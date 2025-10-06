@@ -49,6 +49,17 @@ export default {
    * @returns {Response} JSON response with draw results or error
    */
   async fetch(request) {
+    // Parse the URL to check the pathname
+    const url = new URL(request.url);
+    
+    // Only allow /startdraw endpoint
+    if (url.pathname !== "/startdraw") {
+      return createErrorResponse(
+        `Endpoint not found. Please use POST /startdraw for draw operations.`,
+        404
+      );
+    }
+
     // Handle CORS preflight requests
     if (request.method === "OPTIONS") {
       return new Response(null, {
