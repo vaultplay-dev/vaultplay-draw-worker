@@ -1,5 +1,5 @@
 /**
- * VaultPlay Draw Worker v1.0
+ * VaultPlay Draw Worker v1.1
  * ==========================
  * Cloudflare Worker for transparent, verifiable, and deterministic prize draws
  * 
@@ -19,7 +19,7 @@
  * 3. Scores each entry via SHA-256(seed || entryCode)
  * 4. Ranks entries by score in descending order
  * 
- * @version 1.0
+ * @version 1.1
  * @license MIT
  * @audit This code is designed for public audit and verification
  */
@@ -40,6 +40,16 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
   "Access-Control-Max-Age": "86400"
+};
+
+// Security headers
+const SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "X-XSS-Protection": "1; mode=block",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+  "Permissions-Policy": "geolocation=(), microphone=(), camera=()"
 };
 
 export default {
@@ -64,7 +74,10 @@ export default {
     if (request.method === "OPTIONS") {
       return new Response(null, {
         status: 204,
-        headers: CORS_HEADERS
+        headers: {
+          ...CORS_HEADERS,
+          ...SECURITY_HEADERS
+        }
       });
     }
 
@@ -111,7 +124,8 @@ export default {
         headers: {
           "Content-Type": "application/json",
           "Cache-Control": "no-cache, no-store, must-revalidate",
-          ...CORS_HEADERS
+          ...CORS_HEADERS,
+          ...SECURITY_HEADERS
         }
       });
 
@@ -406,7 +420,8 @@ function createErrorResponse(message, status) {
     headers: {
       "Content-Type": "application/json",
       "Cache-Control": "no-cache",
-      ...CORS_HEADERS
+      ...CORS_HEADERS,
+      ...SECURITY_HEADERS
     }
   });
 }
