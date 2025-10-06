@@ -134,7 +134,7 @@ wrangler deploy --env production
 ### Example Request
 
 ```bash
-curl -X POST https://your-worker.workers.dev \
+curl -X POST https://your-worker.workers.dev/startdraw \
   -H "Content-Type: application/json" \
   -d '{
     "randomness": "dbd8372fa098b50dc58a4827e6f19ef08f5ceab89effaacf2d670e14594ba57f",
