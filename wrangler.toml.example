@@ -1,10 +1,11 @@
 name = "vaultplay-draw-worker"
 main = "src/index.js"
-compatibility_date = "2025-10-05"
+compatibility_date = "2025-10-06"
 
 # Account details - replace with your Cloudflare account ID
 # Find it at: https://dash.cloudflare.com/ (Workers & Pages section)
-account_id = "YOUR_ACCOUNT_ID_HERE"
+# Note: When using Cloudflare's Git integration, account_id is not needed
+# account_id = "YOUR_ACCOUNT_ID_HERE"
 
 # Development environment (uses free workers.dev subdomain)
 [env.development]
@@ -12,13 +13,13 @@ name = "vaultplay-draw-worker-dev"
 # This will be available at: https://vaultplay-draw-worker-dev.YOUR-SUBDOMAIN.workers.dev
 
 # Production environment (uses custom domain)
-# Uncomment and configure if you have a custom domain
-# [env.production]
-# name = "vaultplay-draw-worker"
+[env.production]
+name = "vaultplay-draw-worker"
+# Configure custom domain in Cloudflare Dashboard
 # routes = [
 #   { pattern = "draw.yourdomain.com/*", zone_name = "yourdomain.com" }
 # ]
 
-# Limits configuration
-[limits]
-cpu_ms = 50  # Maximum CPU time per request (50ms)
+# Note: CPU limits are only available on paid plans
+# [limits]
+# cpu_ms = 50
