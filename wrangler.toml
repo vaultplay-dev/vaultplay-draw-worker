@@ -4,6 +4,3 @@ compatibility_date = "2025-10-06"
 
 [env.production]
 name = "vaultplay-draw-worker"
-
-[limits]
-cpu_ms = 50
