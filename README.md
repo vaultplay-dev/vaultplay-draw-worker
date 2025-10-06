@@ -34,7 +34,7 @@ A Cloudflare Worker implementation for transparent, verifiable, and deterministi
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/yourusername/vaultplay-draw-worker.git
+git clone https://github.com/vaultplay-dev/vaultplay-draw-worker.git
 cd vaultplay-draw-worker
 ```
 
@@ -244,7 +244,7 @@ Copyright (c) 2025 VaultPlay
 
 ## 📬 Contact
 
-- Issues: [GitHub Issues](https://github.com/VaultPlay/vaultplay-draw-worker/issues)
+- Issues: [GitHub Issues](https://github.com/vaultplay-dev/vaultplay-draw-worker/issues)
 - Website: [vaultplay.co.uk](https://vaultplay.co.uk)
 
 ## 🔗 Links
