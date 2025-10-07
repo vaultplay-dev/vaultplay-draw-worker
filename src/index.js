@@ -372,6 +372,9 @@ async function formatDrawResponse(rankedEntries, seed, drawRound) {
       resultsChecksum: await computeResultsChecksum(rankedEntries)
     },
     
+    // Winner (rank 1)
+    winner: rankedEntries[0],
+    
     // Full results array
     results: rankedEntries,
     
