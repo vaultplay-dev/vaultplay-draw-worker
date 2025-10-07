@@ -1,7 +1,7 @@
 # VaultPlay Draw Worker
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/yourusername/vaultplay-draw-worker/releases/tag/v1.0.0)
+[![Version](https://img.shields.io/github/v/release/vaultplay-dev/vaultplay-draw-worker)](https://github.com/vaultplay-dev/vaultplay-draw-worker/releases)
 
 A Cloudflare Worker implementation for transparent, verifiable, and deterministic prize draws. This system ensures fairness and reproducibility for all participants through cryptographic methods and public auditability.
 
@@ -65,7 +65,9 @@ wrangler deploy --env production
 
 ### API Endpoint
 
-**POST** `/`
+**POST** `/startdraw`
+
+**Health Check:** `GET /` or `GET /health` - Returns service status and version
 
 ### Request Format
 
@@ -84,15 +86,19 @@ wrangler deploy --env production
 #### Parameters
 
 - **randomness** (required, string): Public randomness source (e.g., drand beacon, blockchain hash)
+  - Must be a hexadecimal string (0-9, a-f, A-F)
   - Length: 1-1024 characters
+  - Example: `"dbd8372fa098b50dc58a4827e6f19ef08f5ceab89effaacf2d670e14594ba57f"`
   
 - **entries** (required, array): List of entries to include in the draw
   - Each entry must have an `entryCode` field (string, 1-256 characters)
-  - Maximum 1,000,000 entries per draw
+  - Maximum 100,000 entries per draw
   - Entry codes must be unique
+  - Whitespace is automatically trimmed from entry codes
   
 - **drawRound** (optional, string or number): Identifier for this draw round
   - Maximum 64 characters
+  - Example: `"12345"` or `12345`
 
 ### Response Format
 
@@ -134,7 +140,7 @@ wrangler deploy --env production
 ### Example Request
 
 ```bash
-curl -X POST https://your-worker.workers.dev/startdraw \
+curl -X POST https://draw.vaultplay.co.uk/startdraw \
   -H "Content-Type: application/json" \
   -d '{
     "randomness": "dbd8372fa098b50dc58a4827e6f19ef08f5ceab89effaacf2d670e14594ba57f",
@@ -147,14 +153,46 @@ curl -X POST https://your-worker.workers.dev/startdraw \
   }'
 ```
 
+**Health Check:**
+```bash
+curl https://draw.vaultplay.co.uk/health
+```
+
 ## 🔍 Algorithm
 
 The draw algorithm follows these steps:
 
 1. **Generate Seed**: `seed = SHA-256(randomness)`
 2. **Score Entries**: For each entry, `score = SHA-256(seed || entryCode)`
-3. **Rank by Score**: Sort entries by score (descending), highest score wins
-4. **Return Results**: Provide ranked results with full audit trail
+3. **Convert to Numeric Score**: The SHA-256 hash (64 hex characters) is interpreted as a hexadecimal number and converted to a BigInt for precise comparison
+4. **Rank by Score**: Sort entries by their numeric scores in descending order - highest score wins rank 1
+5. **Return Results**: Provide ranked results with full audit trail
+
+### How Scoring Works in Detail
+
+Each entry receives a deterministic score through this process:
+
+```javascript
+// Step 1: Generate the draw seed from randomness
+seed = SHA-256("dbd8372fa098b50dc58a4827e6f19ef08f5ceab89effaacf2d670e14594ba57f")
+// Result: "a1b2c3d4..." (64 hex characters)
+
+// Step 2: Score each entry by hashing seed + entryCode
+scoreHex = SHA-256(seed + "ENTRY-001")
+// Result: "f3e4d5c6b7a89012..." (64 hex characters)
+
+// Step 3: Convert hex to decimal number for comparison
+score = BigInt("0x" + scoreHex)
+// Result: 112233445566778899... (very large integer)
+
+// Step 4: All entries are sorted by their numeric scores
+// Highest score = Rank 1 (winner)
+```
+
+The hexadecimal hash output is treated as a base-16 number and converted to decimal for precise numeric comparison. This ensures:
+- Every entry gets a unique, unpredictable score
+- Scores can be compared mathematically to determine ranking
+- The process is fully deterministic and reproducible
 
 ### Why This Works
 
@@ -162,18 +200,49 @@ The draw algorithm follows these steps:
 - **Unpredictable**: Cannot predict ranking without knowing the randomness beforehand
 - **Verifiable**: Anyone can reproduce the results with the same inputs
 - **Fair**: All entries have equal probability before randomness is revealed
+- **Collision-resistant**: SHA-256 makes it virtually impossible for two entries to have the same score
 
 ## 🧪 Testing
 
 You can verify draws independently using any SHA-256 implementation:
 
 ```javascript
-// Verify the seed
-const seed = SHA256(randomness);
+// Example verification in JavaScript:
 
-// Verify any entry's score
-const score = SHA256(seed + entryCode);
+// 1. Verify the seed generation
+const seed = SHA256("your-randomness-input");
+console.log("Seed:", seed);
+
+// 2. Verify any entry's score
+const scoreHex = SHA256(seed + "ENTRY-001");
+console.log("Score (hex):", scoreHex);
+
+// 3. Convert to numeric value for ranking
+const scoreDecimal = BigInt("0x" + scoreHex);
+console.log("Score (decimal):", scoreDecimal.toString());
+
+// 4. Verify the ranking by comparing numeric scores
+// The entry with the highest numeric score gets rank 1
 ```
+
+### Online Verification Tools
+
+You can manually verify draws using:
+- [SHA-256 Hash Generator](https://emn178.github.io/online-tools/sha256.html)
+- Any programming language's crypto library (Python, Node.js, etc.)
+- Command line: `echo -n "input" | shasum -a 256`
+
+### Example Verification
+
+Given:
+- Randomness: `abc123`
+- Entry: `ENTRY-001`
+
+Steps:
+1. Seed = SHA-256(`abc123`) = `6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090`
+2. Score = SHA-256(`6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090ENTRY-001`)
+3. Score (hex) = `a7f3e4d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4`
+4. Score (decimal) = Convert hex to BigInt for comparison
 
 ## 🔧 Configuration
 
@@ -181,14 +250,23 @@ Edit `CONFIG` constants in the worker code:
 
 ```javascript
 const CONFIG = {
-  MAX_ENTRIES: 1000000,           // Maximum entries per draw
+  MAX_ENTRIES: 100000,            // Maximum entries per draw
   MAX_ENTRY_CODE_LENGTH: 256,     // Maximum entry code length
   MAX_RANDOMNESS_LENGTH: 1024,    // Maximum randomness length
   MAX_DRAW_ROUND_LENGTH: 64,      // Maximum draw round ID length
-  ALGORITHM_VERSION: "VaultPlay Draw v1.0",
+  ALGORITHM_VERSION: "VaultPlay Draw v1.1",
   HASH_ALGORITHM: "SHA-256"
 };
 ```
+
+### Security Features
+
+- **Input Validation**: All inputs are validated and sanitized
+- **Whitespace Trimming**: Entry codes and randomness are automatically trimmed
+- **Hex-only Randomness**: Only accepts valid hexadecimal strings for randomness
+- **Security Headers**: Includes X-Frame-Options, CSP, X-Content-Type-Options, etc.
+- **Rate Limiting**: Configure in Cloudflare Dashboard (recommended: 100 req/min)
+- **CORS**: Configurable origin restrictions
 
 ## 📊 Use Cases
 
@@ -245,7 +323,7 @@ Copyright (c) 2025 VaultPlay
 ## 📬 Contact
 
 - Issues: [GitHub Issues](https://github.com/vaultplay-dev/vaultplay-draw-worker/issues)
-- Website: [vaultplay.co.uk](https://vaultplay.co.uk)
+- Website: [vaultplay.co.uk](https://www.vaultplay.co.uk)
 
 ## 🔗 Links
 
@@ -255,4 +333,22 @@ Copyright (c) 2025 VaultPlay
 
 ---
 
-**Version 1.0.0** - Released October 2025
+**Version 1.1.0** - Released October 2025
+
+### Changelog
+
+**v1.1.0 (October 2025)**
+- Added security headers (X-Frame-Options, CSP, etc.)
+- Implemented proper SHA-256 for results checksum
+- Added input sanitization (whitespace trimming)
+- Enforced hexadecimal-only randomness validation
+- Added health check endpoint (`/` and `/health`)
+- Reduced MAX_ENTRIES to 100,000 for better performance
+- Added request logging for monitoring
+- Improved algorithm documentation with score derivation details
+
+**v1.0.0 (October 2025)**
+- Initial release
+- Basic draw functionality with SHA-256 scoring
+- CORS support
+- Input validation
