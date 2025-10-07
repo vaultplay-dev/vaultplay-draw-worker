@@ -117,7 +117,7 @@ export default {
       const rankedEntries = rankEntriesByScore(scoredEntries);
 
       // Step 4: Prepare audit-friendly response
-      const response = formatDrawResponse(rankedEntries, seed, drawRound);
+      const response = await formatDrawResponse(rankedEntries, seed, drawRound);
 
       return new Response(JSON.stringify(response, null, 2), {
         status: 200,
@@ -323,9 +323,9 @@ function rankEntriesByScore(scoredEntries) {
  * @param {Array} rankedEntries - Sorted and ranked entries
  * @param {string} seed - Draw seed (hex)
  * @param {string|null} drawRound - Optional round identifier
- * @returns {Object} Formatted response object
+ * @returns {Promise<Object>} Formatted response object
  */
-function formatDrawResponse(rankedEntries, seed, drawRound) {
+async function formatDrawResponse(rankedEntries, seed, drawRound) {
   return {
     // Draw metadata for audit trail
     metadata: {
@@ -336,7 +336,7 @@ function formatDrawResponse(rankedEntries, seed, drawRound) {
       timestamp: new Date().toISOString(),
       totalEntries: rankedEntries.length,
       // Include checksum of results for integrity verification
-      resultsChecksum: computeResultsChecksum(rankedEntries)
+      resultsChecksum: await computeResultsChecksum(rankedEntries)
     },
     
     // Full results array
@@ -349,34 +349,21 @@ function formatDrawResponse(rankedEntries, seed, drawRound) {
 
 /**
  * Compute a checksum of the results for integrity verification
+ * Uses SHA-256 for cryptographic security
  * @param {Array} results - Ranked results array
- * @returns {string} Hex checksum
+ * @returns {Promise<string>} Hex checksum (first 16 characters)
  */
-function computeResultsChecksum(results) {
+async function computeResultsChecksum(results) {
   // Create a deterministic string representation of results
   const resultsString = results
     .map(r => `${r.rank}:${r.entryCode}:${r.scoreHex}`)
     .join("|");
   
-  // Return first 16 chars of hash as checksum
-  return computeSHA256HexSync(resultsString).substring(0, 16);
-}
-
-/**
- * Synchronous SHA-256 computation for checksum
- * Note: This is a simplified version for the checksum
- * @param {string} input - Input string
- * @returns {string} Hex hash (simplified)
- */
-function computeSHA256HexSync(input) {
-  // Simple hash for checksum - in production, use proper crypto
-  let hash = 0;
-  for (let i = 0; i < input.length; i++) {
-    const char = input.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit integer
-  }
-  return Math.abs(hash).toString(16).padStart(16, "0");
+  // Compute full SHA-256 hash
+  const fullHash = await computeSHA256Hex(resultsString);
+  
+  // Return first 16 chars as checksum
+  return fullHash.substring(0, 16);
 }
 
 /**
