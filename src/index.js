@@ -26,11 +26,11 @@
 
 // Configuration constants
 const CONFIG = {
-  MAX_ENTRIES: 1000000,           // Maximum entries per draw (prevent DoS)
+  MAX_ENTRIES: 100000,            // Maximum entries per draw (reduced for performance)
   MAX_ENTRY_CODE_LENGTH: 256,     // Maximum length for entry codes
   MAX_RANDOMNESS_LENGTH: 1024,    // Maximum length for randomness input
   MAX_DRAW_ROUND_LENGTH: 64,      // Maximum length for draw round identifier
-  ALGORITHM_VERSION: "VaultPlay Draw v1.0",
+  ALGORITHM_VERSION: "VaultPlay Draw v1.1",
   HASH_ALGORITHM: "SHA-256"
 };
 
@@ -62,7 +62,23 @@ export default {
     // Parse the URL to check the pathname
     const url = new URL(request.url);
     
-    // Only allow /startdraw endpoint
+    // Health check endpoint
+    if (url.pathname === "/health" || url.pathname === "/") {
+      return new Response(JSON.stringify({
+        status: "healthy",
+        service: "VaultPlay Draw Worker",
+        version: CONFIG.ALGORITHM_VERSION,
+        timestamp: new Date().toISOString()
+      }, null, 2), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...SECURITY_HEADERS
+        }
+      });
+    }
+    
+    // Only allow /startdraw endpoint for draws
     if (url.pathname !== "/startdraw") {
       return createErrorResponse(
         `Endpoint not found. Please use POST /startdraw for draw operations.`,
@@ -102,6 +118,9 @@ export default {
       }
 
       const { randomness, entries, drawRound } = body;
+
+      // Log draw request (for monitoring/debugging)
+      console.log(`Draw request: round=${drawRound || 'UNSPECIFIED'}, entries=${entries.length}`);
 
       // Step 1: Generate deterministic seed from randomness
       // The seed serves as the foundation for all subsequent calculations
@@ -180,12 +199,23 @@ function validateInput(body) {
     return { valid: false, error: "Field 'randomness' is required and must be a string" };
   }
 
-  if (randomness.length === 0 || randomness.length > CONFIG.MAX_RANDOMNESS_LENGTH) {
+  // Trim whitespace
+  const trimmedRandomness = randomness.trim();
+  
+  if (trimmedRandomness.length === 0 || trimmedRandomness.length > CONFIG.MAX_RANDOMNESS_LENGTH) {
     return { 
       valid: false, 
       error: `Field 'randomness' must be between 1 and ${CONFIG.MAX_RANDOMNESS_LENGTH} characters` 
     };
   }
+
+  // Optional: Validate hex format to enforce hex-only randomness
+  if (!/^[0-9a-fA-F]+$/.test(trimmedRandomness)) {
+    return { valid: false, error: "Field 'randomness' must be a valid hexadecimal string" };
+  }
+
+  // Update body with trimmed value
+  body.randomness = trimmedRandomness;
 
   // Validate entries array
   if (!Array.isArray(entries)) {
@@ -215,6 +245,9 @@ function validateInput(body) {
     if (!entry.entryCode || typeof entry.entryCode !== "string") {
       return { valid: false, error: `Entry at index ${i} must have a string 'entryCode' field` };
     }
+
+    // Trim whitespace from entry codes
+    entry.entryCode = entry.entryCode.trim();
 
     if (entry.entryCode.length === 0 || entry.entryCode.length > CONFIG.MAX_ENTRY_CODE_LENGTH) {
       return { 
