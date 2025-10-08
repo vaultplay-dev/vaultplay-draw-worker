@@ -4,3 +4,6 @@ compatibility_date = "2025-10-06"
 
 [env.production]
 name = "vaultplay-draw-worker"
+GITHUB_REPO_OWNER = "vaultplay-dev"
+GITHUB_REPO_NAME = "vaultplay-draw-history-dev"
+GITHUB_BRANCH = "main"
