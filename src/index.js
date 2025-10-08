@@ -30,7 +30,9 @@ const CONFIG = {
   MAX_ENTRY_CODE_LENGTH: 256,     // Maximum length for entry codes
   MAX_RANDOMNESS_LENGTH: 1024,    // Maximum length for randomness input
   MAX_DRAW_ROUND_LENGTH: 64,      // Maximum length for draw round identifier
-  ALGORITHM_VERSION: "VaultPlay Draw v1.1",
+  MAX_COMPETITION_NAME_LENGTH: 256, // Maximum length for competition name
+  MAX_COMPETITION_ID_LENGTH: 128,   // Maximum length for competition ID
+  ALGORITHM_VERSION: "VaultPlay Draw v1.2",
   HASH_ALGORITHM: "SHA-256"
 };
 
@@ -56,9 +58,10 @@ export default {
   /**
    * Main request handler
    * @param {Request} request - Incoming HTTP request
+   * @param {Object} env - Environment variables (GitHub token, repo config)
    * @returns {Response} JSON response with draw results or error
    */
-  async fetch(request) {
+  async fetch(request, env) {
     // Parse the URL to check the pathname
     const url = new URL(request.url);
     
@@ -117,10 +120,12 @@ export default {
         return createErrorResponse(validationResult.error, 400);
       }
 
-      const { randomness, entries, drawRound } = body;
+      const { randomness, entries, drawRound, competition, randomnessSource } = body;
+      
+      const drawTimestamp = new Date().toISOString();
 
       // Log draw request (for monitoring/debugging)
-      console.log(`Draw request: round=${drawRound || 'UNSPECIFIED'}, entries=${entries.length}`);
+      console.log(`Draw request: competition=${competition?.name || 'N/A'}, mode=${competition?.mode || 'N/A'}, entries=${entries.length}`);
 
       // Step 1: Generate deterministic seed from randomness
       // The seed serves as the foundation for all subsequent calculations
@@ -138,7 +143,68 @@ export default {
       // Step 4: Prepare audit-friendly response
       const response = await formatDrawResponse(rankedEntries, seed, drawRound);
 
-      return new Response(JSON.stringify(response, null, 2), {
+      // Step 5: Generate complete audit bundle
+      const auditBundle = generateAuditBundle(
+        response,
+        competition,
+        randomness,
+        randomnessSource,
+        drawTimestamp
+      );
+
+      // Step 6: Compute bundle hash
+      const bundleHash = await computeSHA256Hex(JSON.stringify(auditBundle));
+
+      // Step 7: Attempt to publish to GitHub (if competition metadata provided)
+      let githubResult = { published: false, reason: "No competition metadata provided" };
+      
+      if (competition && competition.id && competition.name) {
+        try {
+          githubResult = await publishToGitHub(
+            auditBundle,
+            bundleHash,
+            competition,
+            drawTimestamp,
+            env
+          );
+        } catch (githubError) {
+          console.error("GitHub publishing failed:", githubError);
+          githubResult = {
+            published: false,
+            error: githubError.message,
+            retryable: isRetryableError(githubError)
+          };
+        }
+      }
+
+      // Step 8: Extract winner for easy access
+      const winner = rankedEntries[0];
+
+      // Step 9: Return complete response
+      return new Response(JSON.stringify({
+        success: true,
+        draw: {
+          timestamp: drawTimestamp,
+          mode: competition?.mode || "unspecified",
+          competitionId: competition?.id || null,
+          competitionName: competition?.name || null,
+          totalEntries: rankedEntries.length,
+          winner: {
+            rank: winner.rank,
+            entryCode: winner.entryCode,
+            score: winner.score,
+            scoreHex: winner.scoreHex
+          }
+        },
+        audit: {
+          bundle: auditBundle,
+          bundleHash: bundleHash,
+          github: githubResult
+        },
+        metadata: response.metadata,
+        results: response.results,
+        topWinners: response.topWinners
+      }, null, 2), {
         status: 200,
         headers: {
           "Content-Type": "application/json",
@@ -192,7 +258,7 @@ function validateInput(body) {
     return { valid: false, error: "Request body must be a JSON object" };
   }
 
-  const { randomness, entries, drawRound } = body;
+  const { randomness, entries, drawRound, competition, randomnessSource } = body;
 
   // Validate randomness field
   if (!randomness || typeof randomness !== "string") {
@@ -209,7 +275,7 @@ function validateInput(body) {
     };
   }
 
-  // Optional: Validate hex format to enforce hex-only randomness
+  // Validate hex format
   if (!/^[0-9a-fA-F]+$/.test(trimmedRandomness)) {
     return { valid: false, error: "Field 'randomness' must be a valid hexadecimal string" };
   }
@@ -282,6 +348,66 @@ function validateInput(body) {
     }
     // Update the body object with string version
     body.drawRound = drawRoundStr;
+  }
+
+  // Validate optional competition field
+  if (competition !== undefined && competition !== null) {
+    if (typeof competition !== "object" || Array.isArray(competition)) {
+      return { valid: false, error: "Field 'competition' must be an object" };
+    }
+
+    // Validate competition.id
+    if (!competition.id || typeof competition.id !== "string") {
+      return { valid: false, error: "Field 'competition.id' is required and must be a string" };
+    }
+    if (competition.id.trim().length === 0 || competition.id.length > CONFIG.MAX_COMPETITION_ID_LENGTH) {
+      return { 
+        valid: false, 
+        error: `Field 'competition.id' must be between 1 and ${CONFIG.MAX_COMPETITION_ID_LENGTH} characters` 
+      };
+    }
+
+    // Validate competition.name
+    if (!competition.name || typeof competition.name !== "string") {
+      return { valid: false, error: "Field 'competition.name' is required and must be a string" };
+    }
+    if (competition.name.trim().length === 0 || competition.name.length > CONFIG.MAX_COMPETITION_NAME_LENGTH) {
+      return { 
+        valid: false, 
+        error: `Field 'competition.name' must be between 1 and ${CONFIG.MAX_COMPETITION_NAME_LENGTH} characters` 
+      };
+    }
+
+    // Validate competition.mode
+    if (!competition.mode || typeof competition.mode !== "string") {
+      return { valid: false, error: "Field 'competition.mode' is required and must be a string" };
+    }
+    const validModes = ["live", "test"];
+    if (!validModes.includes(competition.mode.toLowerCase())) {
+      return { valid: false, error: `Field 'competition.mode' must be either 'live' or 'test'` };
+    }
+
+    // Trim and normalize
+    competition.id = competition.id.trim();
+    competition.name = competition.name.trim();
+    competition.mode = competition.mode.toLowerCase();
+  }
+
+  // Validate optional randomnessSource field
+  if (randomnessSource !== undefined && randomnessSource !== null) {
+    if (typeof randomnessSource !== "object" || Array.isArray(randomnessSource)) {
+      return { valid: false, error: "Field 'randomnessSource' must be an object" };
+    }
+    // Optional fields - just validate types if provided
+    if (randomnessSource.provider && typeof randomnessSource.provider !== "string") {
+      return { valid: false, error: "Field 'randomnessSource.provider' must be a string" };
+    }
+    if (randomnessSource.timestamp && typeof randomnessSource.timestamp !== "string") {
+      return { valid: false, error: "Field 'randomnessSource.timestamp' must be a string" };
+    }
+    if (randomnessSource.verificationUrl && typeof randomnessSource.verificationUrl !== "string") {
+      return { valid: false, error: "Field 'randomnessSource.verificationUrl' must be a string" };
+    }
   }
 
   return { valid: true };
@@ -372,9 +498,6 @@ async function formatDrawResponse(rankedEntries, seed, drawRound) {
       resultsChecksum: await computeResultsChecksum(rankedEntries)
     },
     
-    // Winner (rank 1)
-    winner: rankedEntries[0],
-    
     // Full results array
     results: rankedEntries,
     
@@ -400,6 +523,351 @@ async function computeResultsChecksum(results) {
   
   // Return first 16 chars as checksum
   return fullHash.substring(0, 16);
+}
+
+/**
+ * Generate complete audit bundle for public verification
+ * @param {Object} drawResponse - Draw response from formatDrawResponse
+ * @param {Object} competition - Competition metadata
+ * @param {string} randomness - Raw randomness value
+ * @param {Object} randomnessSource - Randomness source metadata
+ * @param {string} drawTimestamp - ISO timestamp of draw execution
+ * @returns {Object} Complete audit bundle
+ */
+function generateAuditBundle(drawResponse, competition, randomness, randomnessSource, drawTimestamp) {
+  return {
+    version: "1.0",
+    competition: competition ? {
+      id: competition.id,
+      name: competition.name,
+      mode: competition.mode
+    } : null,
+    draw: {
+      timestamp: drawTimestamp,
+      workerVersion: CONFIG.ALGORITHM_VERSION,
+      endpoint: "/startdraw"
+    },
+    randomness: {
+      value: randomness,
+      source: randomnessSource?.provider || "unspecified",
+      round: randomnessSource?.round || drawResponse.metadata.drawRound,
+      timestamp: randomnessSource?.timestamp || null,
+      verificationUrl: randomnessSource?.verificationUrl || null
+    },
+    entries: {
+      total: drawResponse.metadata.totalEntries,
+      list: drawResponse.results.map(r => ({
+        entryCode: r.entryCode,
+        rank: r.rank
+      }))
+    },
+    results: {
+      winner: drawResponse.results[0],
+      fullRanking: drawResponse.results,
+      seed: drawResponse.metadata.drawSeed,
+      checksum: drawResponse.metadata.resultsChecksum
+    },
+    verification: {
+      algorithm: drawResponse.metadata.algorithm,
+      hashFunction: drawResponse.metadata.hashFunction,
+      sourceCode: "https://github.com/vaultplay-dev/vaultplay-draw-worker"
+    }
+  };
+}
+
+/**
+ * Publish audit bundle to GitHub repository
+ * @param {Object} auditBundle - Complete audit bundle
+ * @param {string} bundleHash - SHA-256 hash of the bundle
+ * @param {Object} competition - Competition metadata
+ * @param {string} drawTimestamp - ISO timestamp
+ * @param {Object} env - Environment variables
+ * @returns {Promise<Object>} Publication result
+ */
+async function publishToGitHub(auditBundle, bundleHash, competition, drawTimestamp, env) {
+  // Check for required environment variables
+  if (!env.GITHUB_TOKEN) {
+    return {
+      published: false,
+      error: "GitHub token not configured",
+      retryable: false
+    };
+  }
+
+  const repoOwner = env.GITHUB_REPO_OWNER || "vaultplay-dev";
+  const repoName = env.GITHUB_REPO_NAME || "vaultplay-draw-history";
+  const branch = env.GITHUB_BRANCH || "main";
+
+  // Generate file path and slug
+  const date = new Date(drawTimestamp);
+  const yearMonth = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+  const slug = slugify(competition.name);
+  const folder = competition.mode === "live" ? "live" : "test";
+  const filePath = `${folder}/${yearMonth}/${slug}/draw.json`;
+
+  // Add bundle hash and publication metadata to bundle
+  auditBundle.bundleHash = bundleHash;
+  auditBundle.publication = {
+    publishedAt: new Date().toISOString(),
+    filePath: filePath
+  };
+
+  try {
+    // Commit file to GitHub
+    const commitResult = await commitFileToGitHub(
+      repoOwner,
+      repoName,
+      branch,
+      filePath,
+      auditBundle,
+      competition,
+      drawTimestamp,
+      env.GITHUB_TOKEN
+    );
+
+    let releaseResult = null;
+
+    // Create release only for live draws
+    if (competition.mode === "live") {
+      try {
+        releaseResult = await createGitHubRelease(
+          repoOwner,
+          repoName,
+          slug,
+          competition,
+          drawTimestamp,
+          filePath,
+          env.GITHUB_TOKEN
+        );
+      } catch (releaseError) {
+        console.error("Release creation failed (non-fatal):", releaseError);
+        // Don't fail the entire operation if only release fails
+      }
+    }
+
+    return {
+      published: true,
+      commitUrl: commitResult.commitUrl,
+      commitSha: commitResult.sha,
+      releaseUrl: releaseResult?.releaseUrl || null,
+      releaseTag: releaseResult?.tag || null,
+      filePath: filePath
+    };
+
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Commit a file to GitHub repository
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {string} branch - Branch name
+ * @param {string} path - File path
+ * @param {Object} content - File content (will be JSON stringified)
+ * @param {Object} competition - Competition metadata
+ * @param {string} timestamp - Draw timestamp
+ * @param {string} token - GitHub token
+ * @returns {Promise<Object>} Commit result
+ */
+async function commitFileToGitHub(owner, repo, branch, path, content, competition, timestamp, token) {
+  const apiBase = "https://api.github.com";
+  
+  // Encode content as base64
+  const contentJson = JSON.stringify(content, null, 2);
+  const contentBase64 = btoa(unescape(encodeURIComponent(contentJson)));
+
+  // Check if file exists to get its SHA (required for updates)
+  let existingFileSha = null;
+  try {
+    const checkResponse = await retryWithBackoff(async () => {
+      const response = await fetch(`${apiBase}/repos/${owner}/${repo}/contents/${path}?ref=${branch}`, {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Accept": "application/vnd.github+json",
+          "User-Agent": "VaultPlay-Draw-Worker"
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return data.sha;
+      }
+      return null;
+    });
+    existingFileSha = checkResponse;
+  } catch (error) {
+    // File doesn't exist, that's fine for new draws
+  }
+
+  // Commit file
+  const commitMessage = competition.mode === "live"
+    ? `Draw audit bundle for ${competition.name} (${competition.id}) at ${timestamp}`
+    : `Test draw audit bundle for ${competition.id} at ${timestamp} [mode: test]`;
+
+  const commitPayload = {
+    message: commitMessage,
+    content: contentBase64,
+    branch: branch
+  };
+
+  if (existingFileSha) {
+    commitPayload.sha = existingFileSha;
+  }
+
+  const commitResponse = await retryWithBackoff(async () => {
+    const response = await fetch(`${apiBase}/repos/${owner}/${repo}/contents/${path}`, {
+      method: "PUT",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "User-Agent": "VaultPlay-Draw-Worker"
+      },
+      body: JSON.stringify(commitPayload)
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`GitHub API error: ${error.message || response.statusText}`);
+    }
+
+    return response.json();
+  });
+
+  return {
+    sha: commitResponse.content.sha,
+    commitUrl: commitResponse.commit.html_url
+  };
+}
+
+/**
+ * Create a GitHub release for a live draw
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {string} slug - Competition slug for tag
+ * @param {Object} competition - Competition metadata
+ * @param {string} timestamp - Draw timestamp
+ * @param {string} filePath - Path to audit bundle file
+ * @param {string} token - GitHub token
+ * @returns {Promise<Object>} Release result
+ */
+async function createGitHubRelease(owner, repo, slug, competition, timestamp, filePath, token) {
+  const apiBase = "https://api.github.com";
+  
+  const tag = `draw-${slug}-${timestamp.split('T')[0]}`;
+  const releaseTitle = `Draw results for ${competition.name}`;
+  const releaseBody = `# ${competition.name}
+
+**Competition ID:** ${competition.id}  
+**Draw Date:** ${timestamp}  
+**Mode:** ${competition.mode}  
+
+## Audit Bundle
+
+The complete audit bundle for this draw is available at:
+[\`${filePath}\`](https://github.com/${owner}/${repo}/blob/main/${filePath})
+
+## Verification
+
+You can independently verify this draw by:
+1. Viewing the audit bundle JSON file
+2. Running the draw worker code with the same inputs
+3. Comparing the results
+
+**Draw Worker Source:** https://github.com/vaultplay-dev/vaultplay-draw-worker
+`;
+
+  const releasePayload = {
+    tag_name: tag,
+    name: releaseTitle,
+    body: releaseBody,
+    draft: false,
+    prerelease: false
+  };
+
+  const releaseResponse = await retryWithBackoff(async () => {
+    const response = await fetch(`${apiBase}/repos/${owner}/${repo}/releases`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "User-Agent": "VaultPlay-Draw-Worker"
+      },
+      body: JSON.stringify(releasePayload)
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`GitHub release error: ${error.message || response.statusText}`);
+    }
+
+    return response.json();
+  });
+
+  return {
+    releaseUrl: releaseResponse.html_url,
+    tag: tag
+  };
+}
+
+/**
+ * Retry a function with exponential backoff
+ * @param {Function} fn - Async function to retry
+ * @param {number} maxRetries - Maximum number of retries
+ * @returns {Promise<any>} Result of function
+ */
+async function retryWithBackoff(fn, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i === maxRetries - 1 || !isRetryableError(error)) {
+        throw error;
+      }
+      // Exponential backoff: 1s, 2s, 4s
+      await sleep(Math.pow(2, i) * 1000);
+    }
+  }
+}
+
+/**
+ * Check if an error is retryable
+ * @param {Error} error - Error object
+ * @returns {boolean} True if error is retryable
+ */
+function isRetryableError(error) {
+  const message = error.message || "";
+  // Check for rate limits, timeouts, and temporary failures
+  return message.includes("rate limit") ||
+         message.includes("502") ||
+         message.includes("503") ||
+         message.includes("504") ||
+         message.includes("timeout");
+}
+
+/**
+ * Sleep for specified milliseconds
+ * @param {number} ms - Milliseconds to sleep
+ * @returns {Promise<void>}
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Convert string to URL-safe slug
+ * @param {string} text - Text to slugify
+ * @returns {string} Slugified text
+ */
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '') // Remove non-word chars except spaces and hyphens
+    .replace(/[\s_-]+/g, '-')  // Replace spaces, underscores with single hyphen
+    .replace(/^-+|-+$/g, '');  // Remove leading/trailing hyphens
 }
 
 /**
