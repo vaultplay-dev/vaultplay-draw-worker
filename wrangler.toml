@@ -2,9 +2,6 @@ name = "vaultplay-draw-worker"
 main = "src/index.js"
 compatibility_date = "2025-10-05"
 
-# Account details - configure with your Cloudflare account
-account_id = "your-account-id-here"
-
 # Development environment (uses free workers.dev subdomain)
 [env.development]
 name = "vaultplay-draw-worker"
@@ -13,9 +10,6 @@ name = "vaultplay-draw-worker"
 # Production environment (uses your custom domain)
 [env.production]
 name = "vaultplay-draw-worker"
-routes = [
-  { pattern = "draw.vaultplay.co.uk/*", zone_name = "vaultplay.co.uk" }
-]
 
 # Limits configuration
 [limits]
