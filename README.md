@@ -73,13 +73,27 @@ wrangler deploy --env production
 
 ```json
 {
-  "randomness": "dbd8372fa098b50dc58a4827e6f19ef08f5ceab89effaacf2d670e14594ba57f",
-  "entries": [
-    { "entryCode": "ENTRY-001" },
-    { "entryCode": "ENTRY-002" },
-    { "entryCode": "ENTRY-003" }
-  ],
-  "drawRound": "5475483"
+    "randomness": "dbd8372fa098b50dc58a4827e6f19ef08f5ceab89effaacf2d670e14594ba57f",
+    "entries":
+    [
+        { "entryCode": "ENTRY-001" },
+        { "entryCode": "ENTRY-002" },
+        { "entryCode": "ENTRY-003" }
+    ],
+    "drawRound": "5475483",
+    "competition":
+    {
+        "id": "COMP-2025-001",
+        "name": "January 2025 Prize Draw",
+        "mode": "live"
+    },
+    "randomnessSource":
+    {
+        "provider": "drand",
+        "round": 5475483,
+        "timestamp": "2025-01-15T13:55:00Z",
+        "verificationUrl": "https://api.drand.sh/public/5475483"
+    }
 }
 ```
 
@@ -100,16 +114,64 @@ wrangler deploy --env production
   - Maximum 64 characters
   - Example: `"12345"` or `12345`
 
+- **competition** (optional, object): Competition metadata for audit bundle generation
+  - **id** (required if competition provided): Unique competition identifier (max 128 chars)
+  - **name** (required if competition provided): Human-readable competition name (max 256 chars)
+  - **mode** (required if competition provided): Either `"live"` or `"test"`
+  - If provided, enables automatic audit bundle publishing to GitHub
+
+- **randomnessSource** (optional, object): Metadata about randomness source for audit trail
+  - **provider** (optional): Source name (e.g., "drand", "bitcoin")
+  - **round** (optional): Round/block number
+  - **timestamp** (optional): ISO 8601 timestamp of randomness generation
+  - **verificationUrl** (optional): URL to verify randomness independently
+
 ### Response Format
 
 ```json
 {
+  "success": true,
+  "draw": {
+    "timestamp": "2025-01-15T14:00:00.000Z",
+    "mode": "live",
+    "competitionId": "COMP-2025-001",
+    "competitionName": "January 2025 Prize Draw",
+    "totalEntries": 3,
+    "winner": {
+      "rank": 1,
+      "entryCode": "ENTRY-002",
+      "score": "98765432109876543210",
+      "scoreHex": "a1b2c3..."
+    }
+  },
+  "audit": {
+    "bundle": {
+      "version": "1.0",
+      "competition": { "id": "...", "name": "...", "mode": "live" },
+      "draw": { "timestamp": "...", "workerVersion": "..." },
+      "randomness": { "value": "...", "source": "drand", ... },
+      "entries": { "total": 3, "list": [...] },
+      "results": { "winner": {...}, "fullRanking": [...] },
+      "verification": { ... },
+      "bundleHash": "sha256-hash-of-bundle",
+      "publication": { "publishedAt": "...", "filePath": "..." }
+    },
+    "bundleHash": "a1b2c3d4e5f6...",
+    "github": {
+      "published": true,
+      "commitUrl": "https://github.com/vaultplay-dev/vaultplay-draw-history/commit/abc123",
+      "commitSha": "abc123...",
+      "releaseUrl": "https://github.com/vaultplay-dev/vaultplay-draw-history/releases/tag/draw-january-2025-prize-2025-01-15",
+      "releaseTag": "draw-january-2025-prize-2025-01-15",
+      "filePath": "live/2025-01/january-2025-prize-draw/draw.json"
+    }
+  },
   "metadata": {
-    "algorithm": "VaultPlay Draw v1.0",
+    "algorithm": "VaultPlay Draw v1.2",
     "hashFunction": "SHA-256",
     "drawRound": "5475483",
-    "drawSeed": "a1b2c3d4...",
-    "timestamp": "2025-10-05T20:00:00.000Z",
+    "drawSeed": "a1b2c3...",
+    "timestamp": "2025-01-15T14:00:00.000Z",
     "totalEntries": 3,
     "resultsChecksum": "f3e4d5c6b7a89012"
   },
@@ -149,7 +211,18 @@ curl -X POST https://draw.vaultplay.co.uk/startdraw \
       { "entryCode": "ENTRY-002" },
       { "entryCode": "ENTRY-003" }
     ],
-    "drawRound": "5475483"
+    "drawRound": "5475483",
+    "competition": {
+      "id": "COMP-2025-001",
+      "name": "January 2025 Prize Draw",
+      "mode": "live"
+    },
+    "randomnessSource": {
+      "provider": "drand",
+      "round": 5475483,
+      "timestamp": "2025-01-15T13:55:00Z",
+      "verificationUrl": "https://api.drand.sh/public/5475483"
+    }
   }'
 ```
 
@@ -246,18 +319,62 @@ Steps:
 
 ## 🔧 Configuration
 
+### Worker Configuration
+
 Edit `CONFIG` constants in the worker code:
 
 ```javascript
 const CONFIG = {
-  MAX_ENTRIES: 100000,            // Maximum entries per draw
-  MAX_ENTRY_CODE_LENGTH: 256,     // Maximum entry code length
-  MAX_RANDOMNESS_LENGTH: 1024,    // Maximum randomness length
-  MAX_DRAW_ROUND_LENGTH: 64,      // Maximum draw round ID length
-  ALGORITHM_VERSION: "VaultPlay Draw v1.1",
+  MAX_ENTRIES: 100000,              // Maximum entries per draw
+  MAX_ENTRY_CODE_LENGTH: 256,       // Maximum entry code length
+  MAX_RANDOMNESS_LENGTH: 1024,      // Maximum randomness length
+  MAX_DRAW_ROUND_LENGTH: 64,        // Maximum draw round ID length
+  MAX_COMPETITION_NAME_LENGTH: 256, // Maximum competition name length
+  MAX_COMPETITION_ID_LENGTH: 128,   // Maximum competition ID length
+  ALGORITHM_VERSION: "VaultPlay Draw v1.2",
   HASH_ALGORITHM: "SHA-256"
 };
 ```
+
+### Environment Variables
+
+For automatic audit bundle publishing to GitHub, configure these environment variables in Cloudflare:
+
+**Required for GitHub Publishing:**
+- `GITHUB_TOKEN` - GitHub Personal Access Token (fine-grained recommended)
+  - Permissions needed: Contents (read & write)
+  - Set via: `wrangler secret put GITHUB_TOKEN --env production`
+  - Or via Cloudflare Dashboard: Workers & Pages → Settings → Variables
+
+**Optional (defaults provided):**
+- `GITHUB_REPO_OWNER` - Repository owner (default: "vaultplay-dev")
+- `GITHUB_REPO_NAME` - Repository name (default: "vaultplay-draw-history")
+- `GITHUB_BRANCH` - Branch name (default: "main")
+
+Set via `wrangler.toml`:
+```toml
+[env.production.vars]
+GITHUB_REPO_OWNER = "your-github-username"
+GITHUB_REPO_NAME = "your-audit-repo"
+GITHUB_BRANCH = "main"
+```
+
+### GitHub Token Setup
+
+1. Go to GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens
+2. Click "Generate new token"
+3. Configure:
+   - **Token name:** VaultPlay Draw Worker
+   - **Expiration:** 90 days (set calendar reminder)
+   - **Repository access:** Only select repositories → choose your audit repository
+   - **Permissions:**
+     - Contents: Read and write ✓
+     - Metadata: Read-only ✓ (automatically selected)
+4. Generate and copy the token
+5. Add to Cloudflare Worker:
+   ```bash
+   wrangler secret put GITHUB_TOKEN --env production
+   ```
 
 ### Security Features
 
@@ -267,6 +384,59 @@ const CONFIG = {
 - **Security Headers**: Includes X-Frame-Options, CSP, X-Content-Type-Options, etc.
 - **Rate Limiting**: Configure in Cloudflare Dashboard (recommended: 100 req/min)
 - **CORS**: Configurable origin restrictions
+- **Graceful Degradation**: Draw succeeds even if GitHub publishing fails
+
+## 📦 Audit Bundle & Public Verification
+
+When competition metadata is provided, the worker automatically:
+1. Generates a complete audit bundle containing all draw data
+2. Commits the bundle to a GitHub repository (configurable)
+3. Creates a public release for live draws
+4. Returns GitHub URLs in the response
+
+### Audit Bundle Structure
+
+The audit bundle is a comprehensive JSON file containing:
+- Competition metadata (ID, name, mode)
+- Complete randomness source information
+- All entries and their rankings
+- Full verification data
+- Bundle hash for integrity checking
+
+### Public Audit Repository
+
+All draws are published to a public GitHub repository for transparency:
+- **Live draws:** Published in `/live/YYYY-MM/competition-name/` with public releases
+- **Test draws:** Published in `/test/YYYY-MM/test-YYYY-MM-DD-###/` (commits only)
+
+Example repository structure:
+```
+vaultplay-draw-history/
+├── live/
+│   └── 2025-01/
+│       └── january-2025-prize-draw/
+│           └── draw.json
+└── test/
+    └── 2025-01/
+        └── test-2025-01-15-001/
+            └── draw.json
+```
+
+### Why Test Draws Are Public
+
+Test draws are published to demonstrate:
+- Continuous system testing
+- Nothing is hidden from public scrutiny
+- Quality assurance processes
+- Complete transparency
+
+### Graceful Degradation
+
+If GitHub publishing fails:
+- ✅ Draw still succeeds and returns results
+- ✅ Complete audit bundle is included in the API response
+- ✅ Bundle can be manually published from worker logs
+- ⚠️ Response indicates publication failure with error details
 
 ## 📊 Use Cases
 
@@ -322,7 +492,7 @@ Copyright (c) 2025 VaultPlay
 
 ## 📬 Contact
 
-- Issues: [GitHub Issues](https://github.com/vaultplay-dev/vaultplay-draw-worker/issues)
+- Issues: [GitHub Issues](https://github.com/VaultPlay/vaultplay-draw-worker/issues)
 - Website: [vaultplay.co.uk](https://www.vaultplay.co.uk)
 
 ## 🔗 Links
@@ -333,9 +503,21 @@ Copyright (c) 2025 VaultPlay
 
 ---
 
-**Version 1.1.0** - Released October 2025
+**Version 1.2.0** - Released October 2025
 
 ### Changelog
+
+**v1.2.0 (October 2025)**
+- Added automatic audit bundle generation and publishing
+- Integrated GitHub repository publishing for complete transparency
+- Audit bundles include competition metadata, randomness source, and full results
+- Auto-create GitHub releases for live draws (commits only for test draws)
+- Added winner extraction in response for easy access
+- Enhanced response format with draw summary and audit information
+- Support for environment-based GitHub configuration
+- Graceful degradation - draw succeeds even if GitHub publishing fails
+- Added competition and randomnessSource fields to request
+- Complete end-to-end audit solution for transparency
 
 **v1.1.0 (October 2025)**
 - Added security headers (X-Frame-Options, CSP, etc.)
