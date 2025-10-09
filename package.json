@@ -1,6 +1,6 @@
 {
   "name": "vaultplay-draw-worker",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Transparent, verifiable, and deterministic prize draw system using Cloudflare Workers",
   "main": "src/index.js",
   "scripts": {
@@ -18,16 +18,16 @@
     "deterministic",
     "transparent"
   ],
-  "author": "vaultplay-dev",
+  "author": "VaultPlay",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vaultplay-dev/vaultplay-draw-worker.git"
+    "url": "https://github.com/VaultPlay/vaultplay-draw-worker.git"
   },
   "bugs": {
-    "url": "https://github.com/vaultplay-dev/vaultplay-draw-worker/issues"
+    "url": "https://github.com/VaultPlay/vaultplay-draw-worker/issues"
   },
-  "homepage": "https://github.com/vaultplay-dev/vaultplay-draw-worker#readme",
+  "homepage": "https://github.com/VaultPlay/vaultplay-draw-worker#readme",
   "devDependencies": {
     "wrangler": "^3.0.0"
   }
