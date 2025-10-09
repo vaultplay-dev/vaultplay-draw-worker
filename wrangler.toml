@@ -1,16 +1,9 @@
 name = "vaultplay-draw-worker"
 main = "src/index.js"
-compatibility_date = "2025-10-05"
+compatibility_date = "2025-10-06"
 
-# Development environment (uses free workers.dev subdomain)
-[env.development]
-name = "vaultplay-draw-worker"
-# This will be available at: https://vaultplay-draw-worker.ops-13d.workers.dev
-
-# Production environment (uses your custom domain)
 [env.production]
 name = "vaultplay-draw-worker"
-
-# Limits configuration
-[limits]
-cpu_ms = 50  # Maximum CPU time per request (50ms)
+GITHUB_REPO_OWNER = "vaultplay-dev"
+GITHUB_REPO_NAME = "vaultplay-draw-history-dev"
+GITHUB_BRANCH = "main"
