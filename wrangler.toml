@@ -2,8 +2,19 @@ name = "vaultplay-draw-worker"
 main = "src/index.js"
 compatibility_date = "2025-10-06"
 
+# Production environment
 [env.production]
 name = "vaultplay-draw-worker"
+
+# GitHub integration (set these via dashboard or wrangler CLI)
+[env.production.vars]
 GITHUB_REPO_OWNER = "vaultplay-dev"
 GITHUB_REPO_NAME = "vaultplay-draw-history-dev"
 GITHUB_BRANCH = "main"
+
+# GITHUB_TOKEN must be set as a secret:
+# wrangler secret put GITHUB_TOKEN --env production
+
+# CPU limits are only available on paid plans - uncomment if you have a paid plan
+# [limits]
+# cpu_ms = 50
