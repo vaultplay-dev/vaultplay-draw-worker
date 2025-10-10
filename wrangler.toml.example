@@ -7,11 +7,6 @@ compatibility_date = "2025-10-06"
 # Note: When using Cloudflare's Git integration, account_id is not needed
 # account_id = "YOUR_ACCOUNT_ID_HERE"
 
-# Development environment (uses free workers.dev subdomain)
-[env.development]
-name = "vaultplay-draw-worker-dev"
-# This will be available at: https://vaultplay-draw-worker-dev.YOUR-SUBDOMAIN.workers.dev
-
 # Production environment (uses custom domain)
 [env.production]
 name = "vaultplay-draw-worker"
@@ -20,6 +15,30 @@ name = "vaultplay-draw-worker"
 #   { pattern = "draw.yourdomain.com/*", zone_name = "yourdomain.com" }
 # ]
 
-# Note: CPU limits are only available on paid plans
+# GitHub integration configuration (optional - for audit publishing)
+# Uncomment these lines and set your values to enable GitHub publishing
+# [env.production.vars]
+# GITHUB_REPO_OWNER = "your-github-username"
+# GITHUB_REPO_NAME = "vaultplay-draw-history"
+# GITHUB_BRANCH = "main"
+
+# IMPORTANT: GITHUB_TOKEN must be set as a secret, not in this file
+# Set via: wrangler secret put GITHUB_TOKEN --env production
+# Or via Cloudflare Dashboard: Workers & Pages → Settings → Variables
+
+# Development environment (uses free workers.dev subdomain)
+[env.development]
+name = "vaultplay-draw-worker-dev"
+# This will be available at: https://vaultplay-draw-worker-dev.YOUR-SUBDOMAIN.workers.dev
+
+# GitHub integration for development (optional)
+# Uncomment to enable GitHub publishing for test draws
+# [env.development.vars]
+# GITHUB_REPO_OWNER = "your-github-username"
+# GITHUB_REPO_NAME = "vaultplay-draw-history-dev"
+# GITHUB_BRANCH = "main"
+
+# CPU limits are only available on paid Cloudflare plans
+# Uncomment if you have a paid plan (Workers Paid or higher)
 # [limits]
-# cpu_ms = 50
+# cpu_ms = 50  # Maximum CPU time per request (50ms)
