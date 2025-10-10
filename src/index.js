@@ -1,5 +1,5 @@
 /**
- * VaultPlay Draw Worker v1.1
+ * VaultPlay Draw Worker v1.2
  * ==========================
  * Cloudflare Worker for transparent, verifiable, and deterministic prize draws
  * 
@@ -12,14 +12,16 @@
  * - CORS configuration
  * - Deterministic output based on public entropy
  * - No side effects or external dependencies during draw calculation
+ * - Automatic audit bundle publishing to GitHub
  * 
  * Algorithm Overview:
  * 1. Accepts public randomness source (e.g., drand beacon, blockchain hash)
  * 2. Generates deterministic seed via SHA-256(randomness)
  * 3. Scores each entry via SHA-256(seed || entryCode)
  * 4. Ranks entries by score in descending order
+ * 5. Publishes audit bundle to GitHub for public verification
  * 
- * @version 1.1
+ * @version 1.2
  * @license MIT
  * @audit This code is designed for public audit and verification
  */
@@ -601,9 +603,10 @@ async function publishToGitHub(auditBundle, bundleHash, competition, drawTimesta
   // Generate file path and slug
   const date = new Date(drawTimestamp);
   const yearMonth = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+  const dateTime = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}-${String(date.getUTCHours()).padStart(2, '0')}${String(date.getUTCMinutes()).padStart(2, '0')}`;
   const slug = slugify(competition.name);
   const folder = competition.mode === "live" ? "live" : "test";
-  const filePath = `${folder}/${yearMonth}/${slug}/draw.json`;
+  const filePath = `${folder}/${yearMonth}/${slug}-${dateTime}/draw.json`;
 
   // Add bundle hash and publication metadata to bundle
   auditBundle.bundleHash = bundleHash;
@@ -702,8 +705,8 @@ async function commitFileToGitHub(owner, repo, branch, path, content, competitio
 
   // Commit file
   const commitMessage = competition.mode === "live"
-    ? `Draw audit bundle for ${competition.name} (${competition.id}) at ${timestamp}`
-    : `Test draw audit bundle for ${competition.id} at ${timestamp} [mode: test]`;
+    ? `Draw audit bundle for ${competition.name} (${competition.id}) at ${timestamp} [${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')} UTC]`
+    : `Test draw audit bundle for ${competition.id} at ${timestamp} [${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')} UTC] [mode: test]`;
 
   const commitPayload = {
     message: commitMessage,
@@ -755,12 +758,15 @@ async function commitFileToGitHub(owner, repo, branch, path, content, competitio
 async function createGitHubRelease(owner, repo, slug, competition, timestamp, filePath, token) {
   const apiBase = "https://api.github.com";
   
-  const tag = `draw-${slug}-${timestamp.split('T')[0]}`;
-  const releaseTitle = `Draw results for ${competition.name}`;
+  const date = new Date(timestamp);
+  const dateTime = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}-${String(date.getUTCHours()).padStart(2, '0')}${String(date.getUTCMinutes()).padStart(2, '0')}`;
+  const tag = `draw-${slug}-${dateTime}`;
+  const releaseTitle = `Draw results for ${competition.name} (${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')} UTC)`;
   const releaseBody = `# ${competition.name}
 
 **Competition ID:** ${competition.id}  
 **Draw Date:** ${timestamp}  
+**Draw Time:** ${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')} UTC  
 **Mode:** ${competition.mode}  
 
 ## Audit Bundle
