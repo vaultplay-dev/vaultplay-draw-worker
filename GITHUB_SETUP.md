@@ -223,9 +223,9 @@ Check the response:
 ### 4.3 Check GitHub Repository
 
 1. Go to your repository: `https://github.com/vaultplay-dev/vaultplay-draw-history`
-2. Navigate to `test/2025-01/test-draw/`
+2. Navigate to `test/2025-01/test-draw-2025-01-15-1400/` (or similar with current date/time)
 3. You should see `draw.json`
-4. View the commit - should show the worker's commit message
+4. View the commit - should show the worker's commit message with UTC time
 
 ## Step 5: Test Live Draw (Creates Release)
 
@@ -251,9 +251,10 @@ curl -X POST https://draw.vaultplay.co.uk/startdraw \
 ```
 
 Check for:
-1. Commit in `/live/2025-01/live-test-draw/`
+1. Commit in `/live/2025-01/live-test-draw-2025-01-15-1405/` (or similar with current time)
 2. GitHub release created: `https://github.com/vaultplay-dev/vaultplay-draw-history/releases`
-3. Release tag: `draw-live-test-draw-2025-01-15`
+3. Release tag format: `draw-live-test-draw-2025-01-15-1405`
+4. Release title includes time: "Draw results for Live Test Draw (14:05 UTC)"
 
 ## Troubleshooting
 
@@ -403,4 +404,4 @@ Simply don't provide `competition` metadata in the request:
 
 - Worker Issues: https://github.com/vaultplay-dev/vaultplay-draw-worker/issues
 - Audit Repository: https://github.com/vaultplay-dev/vaultplay-draw-history
-- VaultPlay: https://www.vaultplay.co.uk
+- VaultPlay: https://vaultplay.co.uk
