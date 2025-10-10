@@ -17,22 +17,28 @@ This guide walks you through setting up automatic audit bundle publishing to Git
 3. Visibility: **Public** (critical for transparency)
 4. Initialize with README: ✓ Yes
 5. Add .gitignore: None
-6. License: MIT (optional)
+6. License: MIT (recommended)
+7. Click "Create repository"
 
 ### 1.2 Create Directory Structure
 
-Create initial folders:
+Create initial folders in your repository:
 
+1. In GitHub, click "Add file" → "Create new file"
+2. Name: `live/.gitkeep`
+3. Commit with message: "Add live draws folder"
+4. Repeat for `test/.gitkeep`
+
+Your structure should look like:
 ```
 vaultplay-draw-history/
 ├── README.md
+├── LICENSE
 ├── live/
 │   └── .gitkeep
 └── test/
     └── .gitkeep
 ```
-
-Commit message: `"Initial repository structure for draw audits"`
 
 ### 1.3 Update Repository README
 
