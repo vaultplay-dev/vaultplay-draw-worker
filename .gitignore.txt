@@ -5,7 +5,6 @@ yarn.lock
 
 # Wrangler
 .wrangler/
-wrangler.toml
 wrangler.toml.local
 
 # Environment variables
