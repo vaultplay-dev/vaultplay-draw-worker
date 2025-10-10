@@ -17,7 +17,7 @@ A Cloudflare Worker implementation for transparent, verifiable, and deterministi
 ## 🔒 Security Highlights
 
 - Input validation and sanitization
-- Protection against DoS attacks (max 1M entries)
+- Protection against DoS attacks (max 100K entries)
 - Rate limiting headers support
 - CORS configuration for public access
 - Deterministic output based on public entropy sources
@@ -48,9 +48,10 @@ npm install
 cp wrangler.toml.example wrangler.toml
 ```
 
-4. Edit `wrangler.toml` and add:
-   - Your Cloudflare Account ID (find it in your Cloudflare dashboard)
-   - Your custom domain (if using one)
+4. Edit `wrangler.toml` and configure:
+   - Update `GITHUB_REPO_OWNER` to your GitHub username (if using audit publishing)
+   - Update `GITHUB_REPO_NAME` if you named your repo differently
+   - For manual deployment, add your Cloudflare Account ID
 
 5. Deploy to Cloudflare Workers:
 ```bash
@@ -73,27 +74,24 @@ wrangler deploy --env production
 
 ```json
 {
-    "randomness": "dbd8372fa098b50dc58a4827e6f19ef08f5ceab89effaacf2d670e14594ba57f",
-    "entries":
-    [
-        { "entryCode": "ENTRY-001" },
-        { "entryCode": "ENTRY-002" },
-        { "entryCode": "ENTRY-003" }
-    ],
-    "drawRound": "5475483",
-    "competition":
-    {
-        "id": "COMP-2025-001",
-        "name": "January 2025 Prize Draw",
-        "mode": "live"
-    },
-    "randomnessSource":
-    {
-        "provider": "drand",
-        "round": 5475483,
-        "timestamp": "2025-01-15T13:55:00Z",
-        "verificationUrl": "https://api.drand.sh/public/5475483"
-    }
+  "randomness": "dbd8372fa098b50dc58a4827e6f19ef08f5ceab89effaacf2d670e14594ba57f",
+  "entries": [
+    { "entryCode": "VP-TEST-001" },
+    { "entryCode": "VP-TEST-002" },
+    { "entryCode": "VP-TEST-003" }
+  ],
+  "drawRound": 5475483,
+  "competition": {
+    "id": "COMP-2025-001",
+    "name": "January 2025 Prize Draw",
+    "mode": "live"
+  },
+  "randomnessSource": {
+    "provider": "drand",
+    "round": 5475483,
+    "timestamp": "2025-01-15T13:55:00Z",
+    "verificationUrl": "https://api.drand.sh/public/5475483"
+  }
 }
 ```
 
@@ -112,7 +110,8 @@ wrangler deploy --env production
   
 - **drawRound** (optional, string or number): Identifier for this draw round
   - Maximum 64 characters
-  - Example: `"12345"` or `12345`
+  - Accepts both strings and numbers
+  - Example: `5475483` or `"5475483"`
 
 - **competition** (optional, object): Competition metadata for audit bundle generation
   - **id** (required if competition provided): Unique competition identifier (max 128 chars)
@@ -211,7 +210,7 @@ curl -X POST https://draw.vaultplay.co.uk/startdraw \
       { "entryCode": "ENTRY-002" },
       { "entryCode": "ENTRY-003" }
     ],
-    "drawRound": "5475483",
+    "drawRound": 5475483,
     "competition": {
       "id": "COMP-2025-001",
       "name": "January 2025 Prize Draw",
@@ -440,11 +439,13 @@ If GitHub publishing fails:
 
 ## 📊 Use Cases
 
-- Prize drawings and giveaways
-- Lottery systems
-- Random selection processes
+- Prize drawings and giveaways with full audit trails
+- Lottery systems with public verification
+- Random selection processes requiring transparency
 - Transparent allocation mechanisms
 - Verifiable randomness applications
+- Competitions requiring regulatory compliance
+- Any draw requiring public trust and auditability
 
 ## 🛡️ Security Considerations
 
@@ -492,8 +493,8 @@ Copyright (c) 2025 VaultPlay
 
 ## 📬 Contact
 
-- Issues: [GitHub Issues](https://github.com/VaultPlay/vaultplay-draw-worker/issues)
-- Website: [vaultplay.co.uk](https://www.vaultplay.co.uk)
+- Issues: [GitHub Issues](https://github.com/vaultplay-dev/vaultplay-draw-worker/issues)
+- Website: [vaultplay.co.uk](https://vaultplay.co.uk)
 
 ## 🔗 Links
 
