@@ -25,8 +25,10 @@ npx wrangler login
 # Copy example config
 cp wrangler.toml.example wrangler.toml
 
-# Edit wrangler.toml and add your account ID
-# (Find it at: https://dash.cloudflare.com → Workers & Pages)
+# Edit wrangler.toml and configure:
+# - Remove 'account_id' line if using Git integration
+# - Or add your account ID from Cloudflare dashboard
+# - Update GITHUB_REPO_OWNER to your GitHub username
 
 # Deploy
 npx wrangler deploy --env production
@@ -40,7 +42,7 @@ Your worker is now live at: `https://vaultplay-draw-worker.YOUR-SUBDOMAIN.worker
 curl -X POST https://vaultplay-draw-worker.YOUR-SUBDOMAIN.workers.dev/startdraw \
   -H "Content-Type: application/json" \
   -d '{
-    "randomness": "abc123def456",
+    "randomness": "abc123def456789012345678901234ab",
     "entries": [
       {"entryCode": "ENTRY-001"},
       {"entryCode": "ENTRY-002"},
@@ -91,7 +93,7 @@ npx wrangler deploy --env production
 curl -X POST https://your-worker-url/startdraw \
   -H "Content-Type: application/json" \
   -d '{
-    "randomness": "def789ghi012",
+    "randomness": "def789ghi012345678901234567890ab",
     "entries": [
       {"entryCode": "TEST-001"},
       {"entryCode": "TEST-002"}
@@ -111,7 +113,8 @@ curl -X POST https://your-worker-url/startdraw \
 Check response for:
 - `"success": true`
 - `"audit.github.published": true`
-- GitHub commit URL
+- GitHub commit URL in response
+- GitHub file path like: `test/2025-01/test-draw-2025-01-15-1400/draw.json`
 
 Visit your GitHub repository to see the audit bundle!
 
