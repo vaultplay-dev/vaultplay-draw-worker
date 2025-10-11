@@ -1,5 +1,5 @@
 /**
- * VaultPlay Draw Worker v1.2
+ * VaultPlay Draw Worker v1.3
  * ==========================
  * Cloudflare Worker for transparent, verifiable, and deterministic prize draws
  * 
@@ -13,15 +13,18 @@
  * - Deterministic output based on public entropy
  * - No side effects or external dependencies during draw calculation
  * - Automatic audit bundle publishing to GitHub
+ * - Optional worker-fetched randomness (eliminates manipulation window)
+ * - Entry disqualification tracking with full transparency
  * 
  * Algorithm Overview:
- * 1. Accepts public randomness source (e.g., drand beacon, blockchain hash)
+ * 1. Accepts public randomness source OR fetches from drand automatically
  * 2. Generates deterministic seed via SHA-256(randomness)
  * 3. Scores each entry via SHA-256(seed || entryCode)
- * 4. Ranks entries by score in descending order
- * 5. Publishes audit bundle to GitHub for public verification
+ * 4. Filters qualified vs disqualified entries
+ * 5. Ranks qualified entries by score in descending order
+ * 6. Publishes audit bundle to GitHub for public verification
  * 
- * @version 1.2
+ * @version 1.3
  * @license MIT
  * @audit This code is designed for public audit and verification
  */
@@ -34,8 +37,13 @@ const CONFIG = {
   MAX_DRAW_ROUND_LENGTH: 64,      // Maximum length for draw round identifier
   MAX_COMPETITION_NAME_LENGTH: 256, // Maximum length for competition name
   MAX_COMPETITION_ID_LENGTH: 128,   // Maximum length for competition ID
-  ALGORITHM_VERSION: "VaultPlay Draw v1.2",
-  HASH_ALGORITHM: "SHA-256"
+  MAX_GAMERTAG_LENGTH: 100,       // Maximum length for gamertag/name
+  MAX_EMAIL_LENGTH: 254,          // Maximum length for email (RFC 5321)
+  MAX_LOCATION_LENGTH: 100,       // Maximum length for country/region
+  MAX_QUIZ_FIELD_LENGTH: 500,     // Maximum length for quiz question/answer
+  ALGORITHM_VERSION: "VaultPlay Draw v1.3",
+  HASH_ALGORITHM: "SHA-256",
+  DRAND_API_URL: "https://api.drand.sh/public/latest"
 };
 
 // CORS headers for transparency and public access
@@ -122,42 +130,93 @@ export default {
         return createErrorResponse(validationResult.error, 400);
       }
 
-      const { randomness, entries, drawRound, competition, randomnessSource } = body;
+      let { randomness, entries, drawRound, competition, randomnessSource } = body;
       
       const drawTimestamp = new Date().toISOString();
 
       // Log draw request (for monitoring/debugging)
       console.log(`Draw request: competition=${competition?.name || 'N/A'}, mode=${competition?.mode || 'N/A'}, entries=${entries.length}`);
 
-      // Step 1: Generate deterministic seed from randomness
+      // Step 1: Get randomness (either provided or fetch from drand)
+      let randomnessFetchedByWorker = false;
+      
+      if (randomnessSource?.autoFetch && randomnessSource?.provider === "drand") {
+        // Worker fetches randomness from drand
+        console.log("Fetching randomness from drand...");
+        try {
+          const drandData = await fetchDrandLatest();
+          randomness = drandData.randomness;
+          randomnessSource.round = drandData.round;
+          randomnessSource.timestamp = new Date(drandData.time * 1000).toISOString();
+          randomnessSource.verificationUrl = `https://api.drand.sh/public/${drandData.round}`;
+          randomnessFetchedByWorker = true;
+          console.log(`Fetched drand round ${drandData.round}`);
+        } catch (error) {
+          console.error("Failed to fetch drand randomness:", error);
+          return createErrorResponse(
+            "Failed to fetch randomness from drand. Please try again or provide randomness manually.",
+            503
+          );
+        }
+      } else if (!randomness) {
+        return createErrorResponse(
+          "Field 'randomness' is required when not using autoFetch",
+          400
+        );
+      }
+
+      // Step 2: Generate deterministic seed from randomness
       // The seed serves as the foundation for all subsequent calculations
       const seed = await computeSHA256Hex(randomness);
 
-      // Step 2: Calculate cryptographic score for each entry
+      // Step 3: Process entries - hash emails if provided
+      const processedEntries = await processEntries(entries);
+
+      // Step 4: Calculate cryptographic score for each entry
       // Score = SHA-256(seed || entryCode)
       // This ensures each entry gets a unique, deterministic score
-      const scoredEntries = await calculateEntryScores(seed, entries);
+      const scoredEntries = await calculateEntryScores(seed, processedEntries);
 
-      // Step 3: Sort entries by score (highest to lowest)
+      // Step 5: Separate qualified from disqualified entries
+      const qualifiedEntries = scoredEntries.filter(e => e.status === "qualified");
+      const disqualifiedEntries = scoredEntries.filter(e => e.status === "disqualified");
+
+      // Step 6: Sort qualified entries by score (highest to lowest)
       // Using BigInt comparison for cryptographic precision
-      const rankedEntries = rankEntriesByScore(scoredEntries);
+      const rankedQualifiedEntries = rankEntriesByScore(qualifiedEntries);
 
-      // Step 4: Prepare audit-friendly response
-      const response = await formatDrawResponse(rankedEntries, seed, drawRound);
+      // Step 7: Prepare complete results (qualified + disqualified)
+      const allResults = [
+        ...rankedQualifiedEntries,
+        ...disqualifiedEntries.map(e => ({
+          ...e,
+          rank: null  // Disqualified entries have no rank
+        }))
+      ];
 
-      // Step 5: Generate complete audit bundle
+      // Step 8: Prepare audit-friendly response
+      const response = await formatDrawResponse(
+        allResults,
+        qualifiedEntries.length,
+        disqualifiedEntries.length,
+        seed,
+        drawRound
+      );
+
+      // Step 9: Generate complete audit bundle
       const auditBundle = generateAuditBundle(
         response,
         competition,
         randomness,
         randomnessSource,
-        drawTimestamp
+        drawTimestamp,
+        randomnessFetchedByWorker
       );
 
-      // Step 6: Compute bundle hash
+      // Step 10: Compute bundle hash
       const bundleHash = await computeSHA256Hex(JSON.stringify(auditBundle));
 
-      // Step 7: Attempt to publish to GitHub (if competition metadata provided)
+      // Step 11: Attempt to publish to GitHub (if competition metadata provided)
       let githubResult = { published: false, reason: "No competition metadata provided" };
       
       if (competition && competition.id && competition.name) {
@@ -179,10 +238,10 @@ export default {
         }
       }
 
-      // Step 8: Extract winner for easy access
-      const winner = rankedEntries[0];
+      // Step 12: Extract winner (first qualified entry)
+      const winner = rankedQualifiedEntries[0] || null;
 
-      // Step 9: Return complete response
+      // Step 13: Return complete response
       return new Response(JSON.stringify({
         success: true,
         draw: {
@@ -190,13 +249,16 @@ export default {
           mode: competition?.mode || "unspecified",
           competitionId: competition?.id || null,
           competitionName: competition?.name || null,
-          totalEntries: rankedEntries.length,
-          winner: {
+          totalEntries: scoredEntries.length,
+          qualifiedEntries: qualifiedEntries.length,
+          disqualifiedEntries: disqualifiedEntries.length,
+          winner: winner ? {
             rank: winner.rank,
             entryCode: winner.entryCode,
+            gamertag: winner.gamertag || null,
             score: winner.score,
             scoreHex: winner.scoreHex
-          }
+          } : null
         },
         audit: {
           bundle: auditBundle,
@@ -262,28 +324,33 @@ function validateInput(body) {
 
   const { randomness, entries, drawRound, competition, randomnessSource } = body;
 
-  // Validate randomness field
-  if (!randomness || typeof randomness !== "string") {
-    return { valid: false, error: "Field 'randomness' is required and must be a string" };
-  }
-
-  // Trim whitespace
-  const trimmedRandomness = randomness.trim();
+  // Validate randomness field (unless autoFetch is enabled)
+  const isAutoFetch = randomnessSource?.autoFetch === true && randomnessSource?.provider === "drand";
   
-  if (trimmedRandomness.length === 0 || trimmedRandomness.length > CONFIG.MAX_RANDOMNESS_LENGTH) {
-    return { 
-      valid: false, 
-      error: `Field 'randomness' must be between 1 and ${CONFIG.MAX_RANDOMNESS_LENGTH} characters` 
-    };
-  }
+  if (!isAutoFetch) {
+    // Randomness is required if not using autoFetch
+    if (!randomness || typeof randomness !== "string") {
+      return { valid: false, error: "Field 'randomness' is required and must be a string (or use randomnessSource.autoFetch)" };
+    }
 
-  // Validate hex format
-  if (!/^[0-9a-fA-F]+$/.test(trimmedRandomness)) {
-    return { valid: false, error: "Field 'randomness' must be a valid hexadecimal string" };
-  }
+    // Trim whitespace
+    const trimmedRandomness = randomness.trim();
+    
+    if (trimmedRandomness.length === 0 || trimmedRandomness.length > CONFIG.MAX_RANDOMNESS_LENGTH) {
+      return { 
+        valid: false, 
+        error: `Field 'randomness' must be between 1 and ${CONFIG.MAX_RANDOMNESS_LENGTH} characters` 
+      };
+    }
 
-  // Update body with trimmed value
-  body.randomness = trimmedRandomness;
+    // Validate hex format
+    if (!/^[0-9a-fA-F]+$/.test(trimmedRandomness)) {
+      return { valid: false, error: "Field 'randomness' must be a valid hexadecimal string" };
+    }
+
+    // Update body with trimmed value
+    body.randomness = trimmedRandomness;
+  }
 
   // Validate entries array
   if (!Array.isArray(entries)) {
@@ -329,6 +396,74 @@ function validateInput(body) {
       return { valid: false, error: `Duplicate entry code detected: "${entry.entryCode}"` };
     }
     entryCodesSet.add(entry.entryCode);
+
+    // Validate optional gamertag field
+    if (entry.gamertag !== undefined && entry.gamertag !== null) {
+      if (typeof entry.gamertag !== "string") {
+        return { valid: false, error: `Entry at index ${i}: 'gamertag' must be a string` };
+      }
+      if (entry.gamertag.length > CONFIG.MAX_GAMERTAG_LENGTH) {
+        return { valid: false, error: `Entry at index ${i}: 'gamertag' exceeds maximum length` };
+      }
+    }
+
+    // Validate optional email field
+    if (entry.email !== undefined && entry.email !== null) {
+      if (typeof entry.email !== "string") {
+        return { valid: false, error: `Entry at index ${i}: 'email' must be a string` };
+      }
+      if (entry.email.length > CONFIG.MAX_EMAIL_LENGTH) {
+        return { valid: false, error: `Entry at index ${i}: 'email' exceeds maximum length` };
+      }
+    }
+
+    // Validate optional entryTimestamp field
+    if (entry.entryTimestamp !== undefined && entry.entryTimestamp !== null) {
+      if (typeof entry.entryTimestamp !== "string") {
+        return { valid: false, error: `Entry at index ${i}: 'entryTimestamp' must be a string` };
+      }
+    }
+
+    // Validate optional location field
+    if (entry.location !== undefined && entry.location !== null) {
+      if (typeof entry.location !== "object" || Array.isArray(entry.location)) {
+        return { valid: false, error: `Entry at index ${i}: 'location' must be an object` };
+      }
+      if (entry.location.country && typeof entry.location.country !== "string") {
+        return { valid: false, error: `Entry at index ${i}: 'location.country' must be a string` };
+      }
+      if (entry.location.country && entry.location.country.length > CONFIG.MAX_LOCATION_LENGTH) {
+        return { valid: false, error: `Entry at index ${i}: 'location.country' exceeds maximum length` };
+      }
+      if (entry.location.region && typeof entry.location.region !== "string") {
+        return { valid: false, error: `Entry at index ${i}: 'location.region' must be a string` };
+      }
+      if (entry.location.region && entry.location.region.length > CONFIG.MAX_LOCATION_LENGTH) {
+        return { valid: false, error: `Entry at index ${i}: 'location.region' exceeds maximum length` };
+      }
+    }
+
+    // Validate optional quiz field
+    if (entry.quiz !== undefined && entry.quiz !== null) {
+      if (typeof entry.quiz !== "object" || Array.isArray(entry.quiz)) {
+        return { valid: false, error: `Entry at index ${i}: 'quiz' must be an object` };
+      }
+      if (entry.quiz.question && typeof entry.quiz.question !== "string") {
+        return { valid: false, error: `Entry at index ${i}: 'quiz.question' must be a string` };
+      }
+      if (entry.quiz.question && entry.quiz.question.length > CONFIG.MAX_QUIZ_FIELD_LENGTH) {
+        return { valid: false, error: `Entry at index ${i}: 'quiz.question' exceeds maximum length` };
+      }
+      if (entry.quiz.answerGiven && typeof entry.quiz.answerGiven !== "string") {
+        return { valid: false, error: `Entry at index ${i}: 'quiz.answerGiven' must be a string` };
+      }
+      if (entry.quiz.answerGiven && entry.quiz.answerGiven.length > CONFIG.MAX_QUIZ_FIELD_LENGTH) {
+        return { valid: false, error: `Entry at index ${i}: 'quiz.answerGiven' exceeds maximum length` };
+      }
+      if (entry.quiz.answerCorrect !== undefined && typeof entry.quiz.answerCorrect !== "boolean") {
+        return { valid: false, error: `Entry at index ${i}: 'quiz.answerCorrect' must be a boolean` };
+      }
+    }
   }
 
   // Validate optional drawRound field
@@ -416,9 +551,85 @@ function validateInput(body) {
 }
 
 /**
+ * Fetch latest randomness from drand
+ * @returns {Promise<Object>} Drand data with randomness, round, and time
+ */
+async function fetchDrandLatest() {
+  const response = await fetch(CONFIG.DRAND_API_URL);
+  
+  if (!response.ok) {
+    throw new Error(`Drand API returned ${response.status}`);
+  }
+  
+  const data = await response.json();
+  
+  return {
+    round: data.round,
+    randomness: data.randomness,
+    time: data.time,
+    signature: data.signature
+  };
+}
+
+/**
+ * Process entries - hash emails and determine qualification status
+ * @param {Array} entries - Array of entry objects
+ * @returns {Promise<Array>} Processed entries with hashed emails and status
+ */
+async function processEntries(entries) {
+  return Promise.all(entries.map(async (entry) => {
+    const processed = {
+      entryCode: entry.entryCode,
+      status: "qualified"  // Default to qualified
+    };
+
+    // Add optional fields if provided
+    if (entry.gamertag) {
+      processed.gamertag = entry.gamertag.trim();
+    }
+
+    // Hash email if provided
+    if (entry.email) {
+      processed.emailHash = await computeSHA256Hex(entry.email.toLowerCase().trim());
+    }
+
+    if (entry.entryTimestamp) {
+      processed.entryTimestamp = entry.entryTimestamp;
+    }
+
+    if (entry.location) {
+      processed.location = {};
+      if (entry.location.country) {
+        processed.location.country = entry.location.country.trim();
+      }
+      if (entry.location.region) {
+        processed.location.region = entry.location.region.trim();
+      }
+    }
+
+    // Handle quiz and disqualification
+    if (entry.quiz) {
+      processed.quiz = {
+        question: entry.quiz.question || null,
+        answerGiven: entry.quiz.answerGiven || null,
+        answerCorrect: entry.quiz.answerCorrect !== undefined ? entry.quiz.answerCorrect : true
+      };
+
+      // Disqualify if quiz was answered incorrectly
+      if (entry.quiz.answerCorrect === false) {
+        processed.status = "disqualified";
+        processed.disqualificationReason = "Quiz answered incorrectly";
+      }
+    }
+
+    return processed;
+  }));
+}
+
+/**
  * Calculate cryptographic scores for all entries
  * @param {string} seed - Hex-encoded seed from randomness
- * @param {Array} entries - Array of entry objects
+ * @param {Array} entries - Array of processed entry objects
  * @returns {Promise<Array>} Array of entries with scores
  */
 async function calculateEntryScores(seed, entries) {
@@ -438,7 +649,7 @@ async function calculateEntryScores(seed, entries) {
       const score = BigInt("0x" + scoreHex);
       
       return {
-        entryCode: entry.entryCode,
+        ...entry,  // Include all entry data (gamertag, email hash, location, quiz, status, etc.)
         score: score,
         // Store hex representation for audit trail
         scoreHex: scoreHex
@@ -468,10 +679,17 @@ function rankEntriesByScore(scoredEntries) {
     return a.entryCode.localeCompare(b.entryCode);
   });
 
-  // Assign sequential ranks
+  // Assign sequential ranks and convert BigInt to string
   return entries.map((entry, index) => ({
     rank: index + 1,
     entryCode: entry.entryCode,
+    gamertag: entry.gamertag || null,
+    emailHash: entry.emailHash || null,
+    entryTimestamp: entry.entryTimestamp || null,
+    location: entry.location || null,
+    quiz: entry.quiz || null,
+    status: entry.status || "qualified",
+    disqualificationReason: entry.disqualificationReason || null,
     // Convert BigInt to string for JSON serialization
     score: entry.score.toString(),
     // Include hex representation for verification
@@ -481,12 +699,14 @@ function rankEntriesByScore(scoredEntries) {
 
 /**
  * Format the final draw response with metadata
- * @param {Array} rankedEntries - Sorted and ranked entries
+ * @param {Array} rankedEntries - All entries (qualified and disqualified)
+ * @param {number} qualifiedCount - Number of qualified entries
+ * @param {number} disqualifiedCount - Number of disqualified entries
  * @param {string} seed - Draw seed (hex)
  * @param {string|null} drawRound - Optional round identifier
  * @returns {Promise<Object>} Formatted response object
  */
-async function formatDrawResponse(rankedEntries, seed, drawRound) {
+async function formatDrawResponse(rankedEntries, qualifiedCount, disqualifiedCount, seed, drawRound) {
   return {
     // Draw metadata for audit trail
     metadata: {
@@ -496,15 +716,17 @@ async function formatDrawResponse(rankedEntries, seed, drawRound) {
       drawSeed: seed,
       timestamp: new Date().toISOString(),
       totalEntries: rankedEntries.length,
+      qualifiedEntries: qualifiedCount,
+      disqualifiedEntries: disqualifiedCount,
       // Include checksum of results for integrity verification
       resultsChecksum: await computeResultsChecksum(rankedEntries)
     },
     
-    // Full results array
+    // Full results array (qualified entries with ranks, then disqualified without ranks)
     results: rankedEntries,
     
-    // Top winners for convenience (first 10 or all if less)
-    topWinners: rankedEntries.slice(0, Math.min(10, rankedEntries.length))
+    // Top winners for convenience (first 10 qualified or all if less)
+    topWinners: rankedEntries.filter(e => e.status === "qualified").slice(0, Math.min(10, qualifiedCount))
   };
 }
 
@@ -534,9 +756,31 @@ async function computeResultsChecksum(results) {
  * @param {string} randomness - Raw randomness value
  * @param {Object} randomnessSource - Randomness source metadata
  * @param {string} drawTimestamp - ISO timestamp of draw execution
+ * @param {boolean} randomnessFetchedByWorker - Whether worker fetched randomness
  * @returns {Object} Complete audit bundle
  */
-function generateAuditBundle(drawResponse, competition, randomness, randomnessSource, drawTimestamp) {
+function generateAuditBundle(drawResponse, competition, randomness, randomnessSource, drawTimestamp, randomnessFetchedByWorker) {
+  // Compile disqualification statistics
+  const disqualificationReasons = {};
+  drawResponse.results.forEach(entry => {
+    if (entry.status === "disqualified" && entry.disqualificationReason) {
+      disqualificationReasons[entry.disqualificationReason] = 
+        (disqualificationReasons[entry.disqualificationReason] || 0) + 1;
+    }
+  });
+
+  // Compile location statistics
+  const countries = {};
+  const regions = {};
+  drawResponse.results.forEach(entry => {
+    if (entry.location?.country) {
+      countries[entry.location.country] = (countries[entry.location.country] || 0) + 1;
+    }
+    if (entry.location?.region) {
+      regions[entry.location.region] = (regions[entry.location.region] || 0) + 1;
+    }
+  });
+
   return {
     version: "1.0",
     competition: competition ? {
@@ -554,17 +798,34 @@ function generateAuditBundle(drawResponse, competition, randomness, randomnessSo
       source: randomnessSource?.provider || "unspecified",
       round: randomnessSource?.round || drawResponse.metadata.drawRound,
       timestamp: randomnessSource?.timestamp || null,
-      verificationUrl: randomnessSource?.verificationUrl || null
+      verificationUrl: randomnessSource?.verificationUrl || null,
+      fetchedByWorker: randomnessFetchedByWorker
     },
     entries: {
       total: drawResponse.metadata.totalEntries,
+      qualified: drawResponse.metadata.qualifiedEntries,
+      disqualified: drawResponse.metadata.disqualifiedEntries,
       list: drawResponse.results.map(r => ({
         entryCode: r.entryCode,
-        rank: r.rank
+        rank: r.rank,
+        gamertag: r.gamertag,
+        emailHash: r.emailHash,
+        entryTimestamp: r.entryTimestamp,
+        location: r.location,
+        quiz: r.quiz,
+        status: r.status,
+        disqualificationReason: r.disqualificationReason
       }))
     },
+    statistics: {
+      disqualificationReasons: Object.keys(disqualificationReasons).length > 0 ? disqualificationReasons : null,
+      locationDistribution: {
+        countries: Object.keys(countries).length > 0 ? countries : null,
+        regions: Object.keys(regions).length > 0 ? regions : null
+      }
+    },
     results: {
-      winner: drawResponse.results[0],
+      winner: drawResponse.results.find(r => r.rank === 1) || null,
       fullRanking: drawResponse.results,
       seed: drawResponse.metadata.drawSeed,
       checksum: drawResponse.metadata.resultsChecksum
