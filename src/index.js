@@ -147,7 +147,7 @@ export default {
           const drandData = await fetchDrandLatest();
           randomness = drandData.randomness;
           randomnessSource.round = drandData.round;
-          randomnessSource.timestamp = new Date(drandData.time * 1000).toISOString();
+          randomnessSource.timestamp = drandData.fetchTime;
           randomnessSource.verificationUrl = `https://api.drand.sh/public/${drandData.round}`;
           randomnessFetchedByWorker = true;
           console.log(`Fetched drand round ${drandData.round}`);
@@ -563,10 +563,20 @@ async function fetchDrandLatest() {
   
   const data = await response.json();
   
+  // Validate response has required fields
+  if (!data.round || !data.randomness) {
+    console.error("Invalid drand response:", data);
+    throw new Error("Drand response missing required fields");
+  }
+  
+  // drand /public/latest doesn't include time, so we use current time
+  // as the approximate fetch time
+  const fetchTime = new Date().toISOString();
+  
   return {
     round: data.round,
     randomness: data.randomness,
-    time: data.time,
+    fetchTime: fetchTime,
     signature: data.signature
   };
 }
