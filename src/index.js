@@ -975,6 +975,7 @@ async function commitFileToGitHub(owner, repo, branch, path, content, competitio
   }
 
   // Commit file
+  const date = new Date(timestamp);
   const commitMessage = competition.mode === "live"
     ? `Draw audit bundle for ${competition.name} (${competition.id}) at ${timestamp} [${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')} UTC]`
     : `Test draw audit bundle for ${competition.id} at ${timestamp} [${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')} UTC] [mode: test]`;
