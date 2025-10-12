@@ -214,7 +214,9 @@ export default {
       );
 
       // Step 10: Compute bundle hash
-      const bundleHash = await computeSHA256Hex(JSON.stringify(auditBundle));
+      const bundleHash = await computeSHA256Hex(JSON.stringify(auditBundle, (key, value) =>
+        typeof value === 'bigint' ? value.toString() : value
+      ));
 
       // Step 11: Attempt to publish to GitHub (if competition metadata provided)
       let githubResult = { published: false, reason: "No competition metadata provided" };
@@ -1143,9 +1145,10 @@ function slugify(text) {
   return text
     .toLowerCase()
     .trim()
-    .replace(/[^\w\s-]/g, '') // Remove non-word chars except spaces and hyphens
-    .replace(/[\s_-]+/g, '-')  // Replace spaces, underscores with single hyphen
-    .replace(/^-+|-+$/g, '');  // Remove leading/trailing hyphens
+    .replace(/[^\w\s-]/g, '')    // Remove non-word chars except spaces and hyphens
+    .replace(/[\s_]+/g, '-')      // Replace spaces and underscores with hyphen
+    .replace(/-+/g, '-')          // Replace multiple hyphens with single hyphen
+    .replace(/^-+|-+$/g, '');     // Remove leading/trailing hyphens
 }
 
 /**
