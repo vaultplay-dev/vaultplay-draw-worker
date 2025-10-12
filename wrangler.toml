@@ -1,6 +1,7 @@
 name = "vaultplay-draw-worker"
 main = "src/index.js"
 compatibility_date = "2025-10-06"
+compatibility_flags = ["nodejs_compat"]
 
 # Production environment
 [env.production]
