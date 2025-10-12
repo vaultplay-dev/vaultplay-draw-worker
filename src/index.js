@@ -270,7 +270,7 @@ export default {
         metadata: response.metadata,
         results: response.results,
         topWinners: response.topWinners
-      }, null, 2), {
+      }, (key, value) => typeof value === 'bigint' ? value.toString() : value, 2), {
         status: 200,
         headers: {
           "Content-Type": "application/json",
@@ -951,7 +951,9 @@ async function commitFileToGitHub(owner, repo, branch, path, content, competitio
   const apiBase = "https://api.github.com";
   
   // Encode content as base64
-  const contentJson = JSON.stringify(content, null, 2);
+  const contentJson = JSON.stringify(content, (key, value) => 
+    typeof value === 'bigint' ? value.toString() : value, 2
+  );
   const contentBase64 = btoa(unescape(encodeURIComponent(contentJson)));
 
   // Check if file exists to get its SHA (required for updates)
