@@ -1,7 +1,7 @@
 // Automated tests for VaultPlay Draw Worker
 // Run with: npx jest __tests__/drawWorker.test.js
 
-import handler from '../src/index.js';
+const handler = require('../src/index.js');
 
 // Helper to mock a fetch request
 function makeRequest(body, method = 'POST') {
