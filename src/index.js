@@ -150,6 +150,10 @@ export default {
           randomnessSource.timestamp = drandData.fetchTime;
           randomnessSource.verificationUrl = `https://api.drand.sh/public/${drandData.round}`;
           randomnessFetchedByWorker = true;
+          // Use drand round as drawRound if not already specified
+          if (!drawRound) {
+            drawRound = drandData.round;
+          }
           console.log(`Fetched drand round ${drandData.round}`);
         } catch (error) {
           console.error("Failed to fetch drand randomness:", error);
