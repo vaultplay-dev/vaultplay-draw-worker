@@ -11,7 +11,10 @@ A Cloudflare Worker implementation for transparent, verifiable, and deterministi
 - **Publicly Auditable**: All draw results can be independently verified
 - **Deterministic**: Same inputs always produce the same results
 - **Transparent**: Open-source algorithm with comprehensive documentation
-- **Production-Ready**: Input validation, rate limiting, CORS support
+- **Auto-Fetch Randomness**: Optional worker-side randomness fetching from drand (eliminates manipulation window)
+- **Entry Disqualification**: Comprehensive tracking of qualified vs disqualified entries with full transparency
+- **Rich Entry Metadata**: Support for gamertags, emails (hashed), locations, quiz responses, and timestamps
+- **Production-Ready**: Input validation, rate limiting, CORS support, automated testing
 - **Zero Side Effects**: No external dependencies during draw calculation
 
 ## 🔒 Security Highlights
@@ -21,6 +24,10 @@ A Cloudflare Worker implementation for transparent, verifiable, and deterministi
 - Rate limiting headers support
 - CORS configuration for public access
 - Deterministic output based on public entropy sources
+- Optional worker-fetched randomness (eliminates manipulation window)
+- Email hashing for privacy (SHA-256)
+- Automatic audit bundle publishing to GitHub
+- Automated testing on deployment
 - No randomness generation - uses external public randomness (e.g., drand, blockchain)
 
 ## 🚀 Quick Start
@@ -55,12 +62,19 @@ cp wrangler.toml.example wrangler.toml
 
 5. Deploy to Cloudflare Workers:
 ```bash
-# Deploy to development
+# Deploy to development (includes automated tests)
 wrangler deploy --env development
 
-# Deploy to production
+# Deploy to production (includes automated tests)
 wrangler deploy --env production
 ```
+
+Automated tests run during deployment to verify:
+- Basic draw functionality
+- Input validation
+- Randomness auto-fetch
+- Entry disqualification logic
+- Error handling
 
 ## 📖 Usage
 
@@ -71,6 +85,8 @@ wrangler deploy --env production
 **Health Check:** `GET /` or `GET /health` - Returns service status and version
 
 ### Request Format
+
+#### Basic Draw (Manual Randomness)
 
 ```json
 {
@@ -95,22 +111,93 @@ wrangler deploy --env production
 }
 ```
 
+#### Advanced Draw (Auto-Fetch Randomness + Rich Entry Data)
+
+```json
+{
+  "entries": [
+    {
+      "entryCode": "VP-2025-001",
+      "gamertag": "ProGamer123",
+      "email": "user@example.com",
+      "entryTimestamp": "2025-01-15T10:30:00Z",
+      "location": {
+        "country": "United Kingdom",
+        "region": "England"
+      },
+      "quiz": {
+        "question": "What year was VaultPlay founded?",
+        "answerGiven": "2024",
+        "answerCorrect": true
+      }
+    },
+    {
+      "entryCode": "VP-2025-002",
+      "gamertag": "Player456",
+      "email": "another@example.com",
+      "quiz": {
+        "question": "What year was VaultPlay founded?",
+        "answerGiven": "2020",
+        "answerCorrect": false
+      }
+    }
+  ],
+  "competition": {
+    "id": "COMP-2025-001",
+    "name": "January 2025 Prize Draw",
+    "mode": "live"
+  },
+  "randomnessSource": {
+    "autoFetch": true,
+    "provider": "drand"
+  }
+}
+```
+
 #### Parameters
 
-- **randomness** (required, string): Public randomness source (e.g., drand beacon, blockchain hash)
-  - Must be a hexadecimal string (0-9, a-f, A-F)
-  - Length: 1-1024 characters
-  - Example: `"dbd8372fa098b50dc58a4827e6f19ef08f5ceab89effaacf2d670e14594ba57f"`
-  
+##### Required Fields
+
 - **entries** (required, array): List of entries to include in the draw
   - Each entry must have an `entryCode` field (string, 1-256 characters)
   - Maximum 100,000 entries per draw
   - Entry codes must be unique
   - Whitespace is automatically trimmed from entry codes
-  
+
+##### Randomness Options (one required)
+
+**Option 1: Manual Randomness**
+- **randomness** (string): Public randomness source (e.g., drand beacon, blockchain hash)
+  - Must be a hexadecimal string (0-9, a-f, A-F)
+  - Length: 1-1024 characters
+  - Example: `"dbd8372fa098b50dc58a4827e6f19ef08f5ceab89effaacf2d670e14594ba57f"`
+
+**Option 2: Auto-Fetch Randomness** (New in v1.3)
+- **randomnessSource.autoFetch** (boolean): Set to `true` to fetch randomness automatically
+- **randomnessSource.provider** (string): Must be `"drand"` when using autoFetch
+- Worker fetches latest randomness from drand, eliminating any manipulation window
+
+##### Optional Entry Fields (New in v1.3)
+
+Each entry can include:
+
+- **gamertag** (string, max 100 chars): Player display name
+- **email** (string, max 254 chars): Email address (automatically hashed with SHA-256 for privacy)
+- **entryTimestamp** (string): ISO 8601 timestamp of when entry was submitted
+- **location** (object): Geographic information
+  - **country** (string, max 100 chars): Country name
+  - **region** (string, max 100 chars): Region/state/province
+- **quiz** (object): Quiz-based qualification
+  - **question** (string, max 500 chars): Quiz question text
+  - **answerGiven** (string, max 500 chars): User's answer
+  - **answerCorrect** (boolean): Whether answer was correct (false = disqualified)
+
+##### Optional Fields
+
 - **drawRound** (optional, string or number): Identifier for this draw round
   - Maximum 64 characters
   - Accepts both strings and numbers
+  - Auto-populated from drand round if using autoFetch
   - Example: `5475483` or `"5475483"`
 
 - **competition** (optional, object): Competition metadata for audit bundle generation
@@ -120,10 +207,11 @@ wrangler deploy --env production
   - If provided, enables automatic audit bundle publishing to GitHub
 
 - **randomnessSource** (optional, object): Metadata about randomness source for audit trail
-  - **provider** (optional): Source name (e.g., "drand", "bitcoin")
-  - **round** (optional): Round/block number
-  - **timestamp** (optional): ISO 8601 timestamp of randomness generation
-  - **verificationUrl** (optional): URL to verify randomness independently
+  - **autoFetch** (boolean): Set to true to fetch randomness from worker (New in v1.3)
+  - **provider** (string): Source name (e.g., "drand", "bitcoin")
+  - **round** (string/number): Round/block number
+  - **timestamp** (string): ISO 8601 timestamp of randomness generation
+  - **verificationUrl** (string): URL to verify randomness independently
 
 ### Response Format
 
@@ -136,9 +224,12 @@ wrangler deploy --env production
     "competitionId": "COMP-2025-001",
     "competitionName": "January 2025 Prize Draw",
     "totalEntries": 3,
+    "qualifiedEntries": 2,
+    "disqualifiedEntries": 1,
     "winner": {
       "rank": 1,
-      "entryCode": "ENTRY-002",
+      "entryCode": "VP-2025-001",
+      "gamertag": "ProGamer123",
       "score": "98765432109876543210",
       "scoreHex": "a1b2c3..."
     }
@@ -147,9 +238,66 @@ wrangler deploy --env production
     "bundle": {
       "version": "1.0",
       "competition": { "id": "...", "name": "...", "mode": "live" },
-      "draw": { "timestamp": "...", "workerVersion": "..." },
-      "randomness": { "value": "...", "source": "drand", ... },
-      "entries": { "total": 3, "list": [...] },
+      "draw": { "timestamp": "...", "workerVersion": "VaultPlay Draw v1.3" },
+      "randomness": { 
+        "value": "...", 
+        "source": "drand",
+        "fetchedByWorker": true,
+        "round": 5475483,
+        "timestamp": "2025-01-15T13:55:00Z",
+        "verificationUrl": "https://api.drand.sh/public/5475483"
+      },
+      "entries": { 
+        "total": 3,
+        "qualified": 2,
+        "disqualified": 1,
+        "list": [
+          {
+            "entryCode": "VP-2025-001",
+            "rank": 1,
+            "gamertag": "ProGamer123",
+            "emailHash": "5e884898da...",
+            "entryTimestamp": "2025-01-15T10:30:00Z",
+            "location": {
+              "country": "United Kingdom",
+              "region": "England"
+            },
+            "quiz": {
+              "question": "What year was VaultPlay founded?",
+              "answerGiven": "2024",
+              "answerCorrect": true
+            },
+            "status": "qualified",
+            "disqualificationReason": null
+          },
+          {
+            "entryCode": "VP-2025-002",
+            "rank": null,
+            "gamertag": "Player456",
+            "emailHash": "a3f5e9c21b...",
+            "quiz": {
+              "question": "What year was VaultPlay founded?",
+              "answerGiven": "2020",
+              "answerCorrect": false
+            },
+            "status": "disqualified",
+            "disqualificationReason": "Quiz answered incorrectly"
+          }
+        ]
+      },
+      "statistics": {
+        "disqualificationReasons": {
+          "Quiz answered incorrectly": 1
+        },
+        "locationDistribution": {
+          "countries": {
+            "United Kingdom": 2
+          },
+          "regions": {
+            "England": 2
+          }
+        }
+      },
       "results": { "winner": {...}, "fullRanking": [...] },
       "verification": { ... },
       "bundleHash": "sha256-hash-of-bundle",
@@ -166,39 +314,60 @@ wrangler deploy --env production
     }
   },
   "metadata": {
-    "algorithm": "VaultPlay Draw v1.2",
+    "algorithm": "VaultPlay Draw v1.3",
     "hashFunction": "SHA-256",
     "drawRound": "5475483",
     "drawSeed": "a1b2c3...",
     "timestamp": "2025-01-15T14:00:00.000Z",
     "totalEntries": 3,
+    "qualifiedEntries": 2,
+    "disqualifiedEntries": 1,
     "resultsChecksum": "f3e4d5c6b7a89012"
   },
   "results": [
     {
       "rank": 1,
-      "entryCode": "ENTRY-002",
+      "entryCode": "VP-2025-001",
+      "gamertag": "ProGamer123",
+      "emailHash": "5e884898da...",
+      "entryTimestamp": "2025-01-15T10:30:00Z",
+      "location": {
+        "country": "United Kingdom",
+        "region": "England"
+      },
+      "quiz": {
+        "question": "What year was VaultPlay founded?",
+        "answerGiven": "2024",
+        "answerCorrect": true
+      },
+      "status": "qualified",
+      "disqualificationReason": null,
       "score": "98765432109876543210",
       "scoreHex": "a1b2c3..."
     },
     {
-      "rank": 2,
-      "entryCode": "ENTRY-001",
+      "rank": null,
+      "entryCode": "VP-2025-002",
+      "gamertag": "Player456",
+      "emailHash": "a3f5e9c21b...",
+      "quiz": {
+        "question": "What year was VaultPlay founded?",
+        "answerGiven": "2020",
+        "answerCorrect": false
+      },
+      "status": "disqualified",
+      "disqualificationReason": "Quiz answered incorrectly",
       "score": "87654321098765432109",
       "scoreHex": "b2c3d4..."
-    },
-    {
-      "rank": 3,
-      "entryCode": "ENTRY-003",
-      "score": "76543210987654321098",
-      "scoreHex": "c3d4e5..."
     }
   ],
   "topWinners": [...]
 }
 ```
 
-### Example Request
+### Example Requests
+
+#### Basic Draw with Manual Randomness
 
 ```bash
 curl -X POST https://draw.vaultplay.co.uk/startdraw \
@@ -225,6 +394,43 @@ curl -X POST https://draw.vaultplay.co.uk/startdraw \
   }'
 ```
 
+#### Advanced Draw with Auto-Fetch Randomness
+
+```bash
+curl -X POST https://draw.vaultplay.co.uk/startdraw \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entries": [
+      {
+        "entryCode": "VP-2025-001",
+        "gamertag": "ProGamer123",
+        "email": "user@example.com",
+        "location": {
+          "country": "United Kingdom"
+        }
+      },
+      {
+        "entryCode": "VP-2025-002",
+        "gamertag": "Player456",
+        "quiz": {
+          "question": "What is 2+2?",
+          "answerGiven": "5",
+          "answerCorrect": false
+        }
+      }
+    ],
+    "competition": {
+      "id": "COMP-2025-001",
+      "name": "January 2025 Prize Draw",
+      "mode": "live"
+    },
+    "randomnessSource": {
+      "autoFetch": true,
+      "provider": "drand"
+    }
+  }'
+```
+
 **Health Check:**
 ```bash
 curl https://draw.vaultplay.co.uk/health
@@ -234,11 +440,27 @@ curl https://draw.vaultplay.co.uk/health
 
 The draw algorithm follows these steps:
 
-1. **Generate Seed**: `seed = SHA-256(randomness)`
-2. **Score Entries**: For each entry, `score = SHA-256(seed || entryCode)`
-3. **Convert to Numeric Score**: The SHA-256 hash (64 hex characters) is interpreted as a hexadecimal number and converted to a BigInt for precise comparison
-4. **Rank by Score**: Sort entries by their numeric scores in descending order - highest score wins rank 1
-5. **Return Results**: Provide ranked results with full audit trail
+1. **Obtain Randomness**: Either use provided randomness OR fetch automatically from drand (v1.3+)
+2. **Generate Seed**: `seed = SHA-256(randomness)`
+3. **Process Entries**: Hash emails for privacy, determine qualification status
+4. **Score Entries**: For each entry, `score = SHA-256(seed || entryCode)`
+5. **Filter Entries**: Separate qualified from disqualified entries
+6. **Convert to Numeric Score**: The SHA-256 hash (64 hex characters) is interpreted as a hexadecimal number and converted to a BigInt for precise comparison
+7. **Rank Qualified Entries**: Sort qualified entries by their numeric scores in descending order - highest score wins rank 1
+8. **Return Results**: Qualified entries with ranks, disqualified entries without ranks, plus full audit trail
+
+### Entry Disqualification (New in v1.3)
+
+Entries can be disqualified based on:
+- **Quiz Answers**: If `quiz.answerCorrect = false`, entry is automatically disqualified
+- **Future Extensions**: System supports adding more disqualification criteria
+
+Disqualified entries:
+- Are included in results with `rank: null`
+- Have `status: "disqualified"`
+- Include `disqualificationReason` explaining why
+- Do not compete for prizes
+- Are tracked in audit bundle statistics
 
 ### How Scoring Works in Detail
 
@@ -257,24 +479,48 @@ scoreHex = SHA-256(seed + "ENTRY-001")
 score = BigInt("0x" + scoreHex)
 // Result: 112233445566778899... (very large integer)
 
-// Step 4: All entries are sorted by their numeric scores
+// Step 4: Filter entries by qualification status
+qualifiedEntries = entries.filter(e => e.status === "qualified")
+disqualifiedEntries = entries.filter(e => e.status === "disqualified")
+
+// Step 5: All qualified entries are sorted by their numeric scores
 // Highest score = Rank 1 (winner)
+// Disqualified entries have rank = null
 ```
 
 The hexadecimal hash output is treated as a base-16 number and converted to decimal for precise numeric comparison. This ensures:
 - Every entry gets a unique, unpredictable score
 - Scores can be compared mathematically to determine ranking
 - The process is fully deterministic and reproducible
+- Only qualified entries compete for rankings
 
 ### Why This Works
 
 - **Deterministic**: Same inputs always produce identical results
 - **Unpredictable**: Cannot predict ranking without knowing the randomness beforehand
 - **Verifiable**: Anyone can reproduce the results with the same inputs
-- **Fair**: All entries have equal probability before randomness is revealed
+- **Fair**: All qualified entries have equal probability before randomness is revealed
+- **Transparent**: Disqualified entries are clearly marked with reasons
 - **Collision-resistant**: SHA-256 makes it virtually impossible for two entries to have the same score
+- **Privacy-Preserving**: Emails are hashed, never stored in plaintext
 
 ## 🧪 Testing
+
+### Automated Testing
+
+The deployment process includes automated tests that verify:
+- ✅ Basic draw functionality
+- ✅ Input validation and sanitization
+- ✅ Auto-fetch randomness from drand
+- ✅ Entry disqualification logic
+- ✅ Email hashing
+- ✅ Quiz-based qualification
+- ✅ Error handling
+- ✅ Health check endpoint
+
+Tests run automatically on every deployment to both development and production environments.
+
+### Manual Verification
 
 You can verify draws independently using any SHA-256 implementation:
 
@@ -293,8 +539,13 @@ console.log("Score (hex):", scoreHex);
 const scoreDecimal = BigInt("0x" + scoreHex);
 console.log("Score (decimal):", scoreDecimal.toString());
 
-// 4. Verify the ranking by comparing numeric scores
+// 4. Verify email hashing
+const emailHash = SHA256("user@example.com");
+console.log("Email hash:", emailHash);
+
+// 5. Verify the ranking by comparing numeric scores
 // The entry with the highest numeric score gets rank 1
+// Disqualified entries have rank = null
 ```
 
 ### Online Verification Tools
@@ -309,12 +560,14 @@ You can manually verify draws using:
 Given:
 - Randomness: `abc123`
 - Entry: `ENTRY-001`
+- Email: `user@example.com`
 
 Steps:
 1. Seed = SHA-256(`abc123`) = `6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090`
 2. Score = SHA-256(`6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090ENTRY-001`)
 3. Score (hex) = `a7f3e4d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4`
 4. Score (decimal) = Convert hex to BigInt for comparison
+5. Email Hash = SHA-256(`user@example.com`) = `5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8`
 
 ## 🔧 Configuration
 
@@ -330,8 +583,13 @@ const CONFIG = {
   MAX_DRAW_ROUND_LENGTH: 64,        // Maximum draw round ID length
   MAX_COMPETITION_NAME_LENGTH: 256, // Maximum competition name length
   MAX_COMPETITION_ID_LENGTH: 128,   // Maximum competition ID length
-  ALGORITHM_VERSION: "VaultPlay Draw v1.2",
-  HASH_ALGORITHM: "SHA-256"
+  MAX_GAMERTAG_LENGTH: 100,         // Maximum gamertag length
+  MAX_EMAIL_LENGTH: 254,            // Maximum email length (RFC 5321)
+  MAX_LOCATION_LENGTH: 100,         // Maximum country/region length
+  MAX_QUIZ_FIELD_LENGTH: 500,       // Maximum quiz question/answer length
+  ALGORITHM_VERSION: "VaultPlay Draw v1.3",
+  HASH_ALGORITHM: "SHA-256",
+  DRAND_API_URL: "https://api.drand.sh/public/latest"
 };
 ```
 
@@ -380,9 +638,12 @@ GITHUB_BRANCH = "main"
 - **Input Validation**: All inputs are validated and sanitized
 - **Whitespace Trimming**: Entry codes and randomness are automatically trimmed
 - **Hex-only Randomness**: Only accepts valid hexadecimal strings for randomness
+- **Email Privacy**: Emails are hashed with SHA-256, never stored in plaintext
+- **Auto-Fetch Randomness**: Eliminates manipulation window by fetching randomness server-side
 - **Security Headers**: Includes X-Frame-Options, CSP, X-Content-Type-Options, etc.
 - **Rate Limiting**: Configure in Cloudflare Dashboard (recommended: 100 req/min)
 - **CORS**: Configurable origin restrictions
+- **Automated Testing**: Continuous validation of functionality on every deployment
 - **Graceful Degradation**: Draw succeeds even if GitHub publishing fails
 
 ## 📦 Audit Bundle & Public Verification
@@ -397,8 +658,10 @@ When competition metadata is provided, the worker automatically:
 
 The audit bundle is a comprehensive JSON file containing:
 - Competition metadata (ID, name, mode)
-- Complete randomness source information
-- All entries and their rankings
+- Complete randomness source information (including `fetchedByWorker` flag)
+- All entries with qualification status and disqualification reasons
+- Entry metadata (gamertags, email hashes, locations, quiz responses)
+- Statistics on disqualifications and location distribution
 - Full verification data
 - Bundle hash for integrity checking
 
@@ -441,10 +704,12 @@ If GitHub publishing fails:
 
 - Prize drawings and giveaways with full audit trails
 - Lottery systems with public verification
+- Quiz-based competitions with automatic disqualification
 - Random selection processes requiring transparency
 - Transparent allocation mechanisms
 - Verifiable randomness applications
 - Competitions requiring regulatory compliance
+- Geographic-based draws with location tracking
 - Any draw requiring public trust and auditability
 
 ## 🛡️ Security Considerations
@@ -455,10 +720,27 @@ The security of this system depends on the quality of the randomness input:
 
 - ✅ **Recommended**: Use public, verifiable randomness sources
   - [drand](https://drand.love/) - League of Entropy's distributed randomness beacon
+    - **Best Practice**: Use `autoFetch: true` to eliminate manipulation window
   - Blockchain hashes (Bitcoin, Ethereum)
   - Public lottery draws
   
 - ❌ **Not Recommended**: Self-generated or private randomness
+
+### Auto-Fetch Randomness Benefits (v1.3)
+
+When using `randomnessSource.autoFetch = true`:
+- ✅ Worker fetches randomness at draw time
+- ✅ Eliminates window for manipulation between randomness reveal and draw
+- ✅ Randomness cannot be chosen to influence outcome
+- ✅ Full transparency - fetch time and source recorded in audit bundle
+- ✅ Automatic verification URL included
+
+### Privacy Considerations
+
+- **Email Hashing**: Emails are hashed with SHA-256 before storage
+- **One-Way Function**: Original emails cannot be recovered from hashes
+- **Verification**: Email owners can verify their entry by hashing their email
+- **Transparency**: Email hashes are included in public audit bundles
 
 ### Audit Trail
 
@@ -466,6 +748,9 @@ All draws include:
 - Complete input parameters
 - Algorithm version
 - Timestamp
+- Randomness source metadata (including whether fetched by worker)
+- Entry qualification status and disqualification reasons
+- Statistics on disqualifications and locations
 - Results checksum
 - Full ranking with cryptographic scores
 
@@ -479,6 +764,8 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
+All pull requests trigger automated tests to ensure functionality.
+
 ## 📝 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
@@ -490,6 +777,7 @@ Copyright (c) 2025 VaultPlay
 - Inspired by transparent lottery systems and public randomness beacons
 - Built for the VaultPlay platform
 - Uses Cloudflare Workers edge computing
+- [drand](https://drand.love/) for distributed randomness beacon
 
 ## 📬 Contact
 
@@ -504,9 +792,47 @@ Copyright (c) 2025 VaultPlay
 
 ---
 
-**Version 1.2.0** - Released October 2025
+**Version 1.3.0** - Released October 2025
 
 ### Changelog
+
+**v1.3.0 (October 2025)**
+- ✨ **Auto-Fetch Randomness**: Worker can now fetch randomness from drand automatically
+  - Set `randomnessSource.autoFetch = true` to enable
+  - Eliminates manipulation window between randomness reveal and draw
+  - Automatic verification URL and timestamp included
+- ✨ **Entry Disqualification System**: Comprehensive qualification tracking
+  - Support for `status: "qualified"` or `"disqualified"`
+  - Automatic disqualification based on quiz answers (`quiz.answerCorrect = false`)
+  - Full transparency with `disqualificationReason` field
+  - Statistics on disqualification reasons in audit bundle
+- ✨ **Rich Entry Metadata**: Enhanced entry data support
+  - `gamertag`: Player display name
+  - `email`: Email address (automatically hashed with SHA-256 for privacy)
+  - `entryTimestamp`: When entry was submitted
+  - `location`: Country and region tracking
+  - `quiz`: Question, answer, and correctness tracking
+- 📊 **Enhanced Audit Bundles**:
+  - Location distribution statistics (countries and regions)
+  - Disqualification reason statistics
+  - `fetchedByWorker` flag for randomness transparency
+  - Separate counts for qualified vs disqualified entries
+- 🎯 **Improved Results**:
+  - Qualified entries ranked 1, 2, 3, etc.
+  - Disqualified entries included with `rank: null`
+  - Winner response includes gamertag if provided
+  - Full metadata in results array
+- 🧪 **Automated Testing**: Tests run on every deployment
+  - Validates draw functionality
+  - Tests auto-fetch randomness
+  - Verifies disqualification logic
+  - Ensures error handling works correctly
+- 🔒 **Privacy Enhancement**: Email hashing for participant privacy
+- 📏 **New Configuration Limits**:
+  - `MAX_GAMERTAG_LENGTH: 100`
+  - `MAX_EMAIL_LENGTH: 254`
+  - `MAX_LOCATION_LENGTH: 100`
+  - `MAX_QUIZ_FIELD_LENGTH: 500`
 
 **v1.2.0 (October 2025)**
 - Added automatic audit bundle generation and publishing
