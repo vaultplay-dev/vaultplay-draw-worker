@@ -18,7 +18,7 @@ describe('VaultPlay Draw Worker - Input Validation', () => {
     
     expect(response.status).toBe(400);
     const data = await response.json();
-    expect(data.error).toMatch(/randomness/i);
+    expect(data.message).toMatch(/randomness/i);
   });
 
   it('returns error for empty entries', async () => {
@@ -34,7 +34,7 @@ describe('VaultPlay Draw Worker - Input Validation', () => {
     
     expect(response.status).toBe(400);
     const data = await response.json();
-    expect(data.error).toMatch(/entries/i);
+    expect(data.message).toMatch(/entries/i);
   });
 
   it('returns error for invalid randomness hex', async () => {
@@ -53,7 +53,7 @@ describe('VaultPlay Draw Worker - Input Validation', () => {
     
     expect(response.status).toBe(400);
     const data = await response.json();
-    expect(data.error).toMatch(/hexadecimal/i);
+    expect(data.message).toMatch(/hexadecimal/i);
   });
 
   it('returns error for duplicate entry codes', async () => {
@@ -75,7 +75,7 @@ describe('VaultPlay Draw Worker - Input Validation', () => {
     
     expect(response.status).toBe(400);
     const data = await response.json();
-    expect(data.error).toMatch(/duplicate/i);
+    expect(data.message).toMatch(/duplicate/i);
   });
 });
 
