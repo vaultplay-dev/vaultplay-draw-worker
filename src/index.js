@@ -1151,9 +1151,8 @@ function slugify(text) {
   return text
     .toLowerCase()
     .trim()
-    .replace(/[^\w\s-]/g, '')    // Remove non-word chars except spaces and hyphens
-    .replace(/[\s_]+/g, '-')      // Replace spaces and underscores with hyphen
-    .replace(/-+/g, '-')          // Replace multiple hyphens with single hyphen
+    .replace(/[^\w\s-]/g, '')     // Remove non-word chars except spaces and hyphens
+    .replace(/[\s_-]+/g, '-')     // Replace spaces, underscores, and hyphens with single hyphen
     .replace(/^-+/, '')           // Remove leading hyphens (non-global)
     .replace(/-+$/, '');          // Remove trailing hyphens (non-global)
 }
